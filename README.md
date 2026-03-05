@@ -1,45 +1,82 @@
-# Solar ROI - Automação de Extração e Análise de Break-even
+# ☀️ Solar ROI: Automação e Análise de Break-even (Neoenergia)
 
-Solução de RPA em Python para extração, consolidação e análise financeira de faturas de energia do portal Neoenergia Brasília. Projetada para investidores solares e gestores de múltiplas UCs, substitui conferência manual de PDFs por fluxo estruturado e auditável, com foco no cálculo preciso do break-even.
+Este repositório contém uma solução de RPA (Robotic Process Automation) desenvolvida em Python para extração, consolidação e análise financeira de faturas de energia do portal Neoenergia Brasília.
 
-## 🚀 Objetivo do Projeto
-- **Automação de Fluxo**: Extração robusta de faturas, superando desafios de reCAPTCHA.
-- **Consolidação de Dados**: Agregamento de consumo e créditos solares em `dados_faturas.json`.
-- **Análise Financeira**: Visualização do ROI e projeção do ponto de equilíbrio (*break-even*) via dashboard.
-- **Auditoria**: Organização automática de PDFs em `faturas/`.
+O sistema foi projetado para investidores de energia solar e gestores de múltiplas Unidades Consumidoras (UCs) que necessitam substituir a conferência manual de PDFs por um fluxo de dados estruturado, auditável e focado no cálculo preciso do *break-even* do investimento.
 
-## 🛠️ Instalação e Configuração
+## 🚀 Capacidades do Sistema
 
-### 1. Pré-requisitos
-- Python 3.9+ e Node.js.
-- FFmpeg (para áudio-captcha).
-- Playwright:
-  ```bash
-  pip install -r requirements.txt
-  playwright install chromium
-  ```
+* **Extração Resiliente (Web Scraping):** Navegação automatizada via Playwright com contramedidas nativas contra detecção de bots e resolução assistida de reCAPTCHA (via processamento de áudio-captcha).
+* **Consolidação em Lote:** Agregação de histórico de consumo, injeção de energia e créditos solares acumulados em um banco de dados local (`dados_faturas.json`).
+* **Inteligência Financeira:** Motor de cálculo que processa o custo evitado (economia) e projeta o Retorno sobre o Investimento (ROI) em um *dashboard* interativo local.
+* **Auditoria Documental:** Download sistemático e arquivamento espelhado dos PDFs originais na pasta `faturas/` para *compliance* e conferência manual.
 
-### 2. Configuração Inicial (Setup)
-Para garantir sua segurança e privacidade, o projeto utiliza um assistente de configuração. Execute o comando abaixo para informar suas credenciais e UCs de forma segura:
+## 🛠️ Arquitetura e Pré-requisitos
+
+Esta ferramenta é executada localmente, garantindo que credenciais e dados financeiros nunca deixem a máquina do usuário.
+
+**Dependências do Sistema:**
+
+* Python 3.9+
+* Node.js (Motor de renderização do Dashboard)
+* FFmpeg (Obrigatório para o módulo de resolução de áudio-captcha)
+
+**Instalação do Ambiente:**
+
+```bash
+# Clone o repositório
+git clone https://github.com/seu-usuario/solar-roi.git
+cd solar-roi
+
+# Instale as dependências Python
+pip install -r requirements.txt
+
+# Instale os binários de navegação do Playwright
+playwright install chromium
+
+```
+
+## ⚙️ Configuração Segura (Setup)
+
+O projeto não utiliza arquivos de configuração expostos no controle de versão. Para inicializar suas credenciais e definir o valor do capital investido na usina:
+
 ```bash
 python setup.py
+
 ```
-Este script criará os arquivos `.env` e `config.json` localmente. No passo de investimento, use o formato nacional (ex: `R$ 25.000,00`). **Nunca envie estes arquivos para o GitHub.**
 
-## 📖 Como Usar
-1. Após rodar o `setup.py`, inicie a extração:
-   ```bash
-   python extractor.py --todos --auto
-   ```
-2. **Nota sobre reCAPTCHA**: O robô possui algoritmos para superar o reCAPTCHA automaticamente (clique analógico e áudio-captcha). No entanto, em casos raros de detecção agressiva, o navegador abrirá para que você realize o desafio manualmente e o robô possa prosseguir.
+*O assistente interativo guiará a criação dos arquivos `.env` e `config.json` locais. As credenciais são criptografadas em tempo de execução.*
 
-3. Após a conclusão, os dados estarão em `dados_faturas.json`.
-4. Para ver o Dashboard, abra o `index.html` (certifique-se de que um servidor local como `python -m http.server 8888` esteja rodando na raiz do projeto).
+## 📊 Fluxo de Execução
 
-## 🔒 Segurança e Privacidade
-- O arquivo `.gitignore` já está configurado para ignorar dados sensíveis.
-- O script `setup.py` facilita a configuração sem que você precise editar arquivos JSON manualmente.
-- Seus PDFs e dados de fatura são salvos apenas na sua máquina local.
+1. **Inicie a Rotina de Extração:**
+```bash
+python extractor.py --todos --auto
+
+```
+
+
+> **Aviso de Intervenção (reCAPTCHA):** O robô tenta a resolução automática via áudio. Caso a Neoenergia ative defesas agressivas, o script pausará e abrirá a janela do navegador para resolução manual do desafio humano, retomando a automação em seguida.
+
+
+2. **Visualização de Resultados:**
+Com os dados consolidados no `dados_faturas.json`, levante o servidor local para acessar o Dashboard Financeiro:
+```bash
+python -m http.server 8888
+
+```
+
+
+Acesse `http://localhost:8888` no seu navegador.
+
+## 🔒 Privacidade e Compliance
+
+* **Zero Telemetria:** O código não possui chamadas de rede externas além da comunicação direta com os servidores da Neoenergia.
+* **Local-First:** Todo o processamento analítico e armazenamento de PDFs ocorre na infraestrutura do usuário.
+* O `.gitignore` é rigorosamente configurado para prevenir vazamentos acidentais de credenciais (`.env`) ou dados financeiros (`*.json`, `*.pdf`).
 
 ---
-*Transformando faturas de energia em inteligência financeira.*
+
+*Transformando dados brutos de faturas de energia em previsibilidade financeira.*
+
+---
