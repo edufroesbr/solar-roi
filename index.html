@@ -457,17 +457,19 @@
 
                 filteredAll.forEach(f => {
                     const ref = f.referencia || f.mes.split('/').reverse().join('-');
-                    if (!map[ref]) map[ref] = { mes: f.mes, referencia: ref, recuperado: 0, consumo: 0, pago: 0, detalhes: [] };
+                    if (!map[ref]) map[ref] = { mes: f.mes, referencia: ref, recuperado: 0, consumo: 0, pago: 0, bruto: 0, detalhes: [] };
 
                     const unitRecovery = (f.credito_reais || 0);
                     map[ref].recuperado += unitRecovery;
                     map[ref].consumo += (f.kwh_faturado || 0);
                     map[ref].pago += (f.valor_pago || 0);
+                    map[ref].bruto += (f.valor_sem_solar || 0);
                     map[ref].detalhes.push({
                         nome: unidadesInfo[f.uc]?.nome || f.uc,
                         cor: unidadesInfo[f.uc]?.cor || '#888',
                         kwh: f.kwh_faturado,
                         pago: f.valor_pago,
+                        bruto: f.valor_sem_solar,
                         recuperado: unitRecovery,
                         fonte: f.fonte
                     });
@@ -640,8 +642,9 @@
                                                 <th style={{ width: '40px' }}></th>
                                                 <th>Competência<div className="metric-sub">O "Quando"</div></th>
                                                 <th>Consumo Útil (kWh)<div className="metric-sub">O "Quanto"</div></th>
-                                                <th>Total Pago à Neoenergia<div className="metric-sub">O "Custo"</div></th>
-                                                <th>Recuperado (Crédito Solar)<div className="metric-sub">O "Ganho"</div></th>
+                                                <th>Custo Bruto (Total)<div className="metric-sub">O "Valor Sem Solar"</div></th>
+                                                <th>Pagar (Residual)<div className="metric-sub">Taxas Neoenergia</div></th>
+                                                <th>Economia (ROI)<div className="metric-sub">Custo Evitado</div></th>
                                                 <th>ROI Mensal<div className="metric-sub">A "Paga"</div></th>
                                             </tr>
                                         </thead>
@@ -656,7 +659,8 @@
                                                         <td style={{ textAlign: 'center', fontSize: 10 }}>{abertoId === m.referencia ? '▼' : '▶'}</td>
                                                         <td style={{ fontWeight: 800 }}>{m.mes}</td>
                                                         <td className="mono">{m.consumo} kWh</td>
-                                                        <td className="mono">{fmt(m.pago)}</td>
+                                                        <td className="mono" style={{ fontWeight: 700 }}>{fmt(m.bruto || (m.recuperado + m.pago))}</td>
+                                                        <td className="mono" style={{ color: "var(--text-sub)", fontSize: '12px' }}>{fmt(m.pago)}</td>
                                                         <td className="mono" style={{ color: "var(--primary)", fontWeight: 900 }}>{fmt(m.recuperado)}</td>
                                                         <td>
                                                             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

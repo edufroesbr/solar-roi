@@ -22,9 +22,10 @@ except ImportError:
 # Padrões regex
 # ---------------------------------------------------------------------------
 
+# Regex para capturar o "Total a Pagar" (Neoenergia agrupa UC + Vencimento + Valor)
 REGEX_VALOR_TOTAL = re.compile(
-    r"(?:valor\s+(?:total|a\s+pagar|da\s+fatura|cobrado)|total\s+a\s+pagar)[^\d]*"
-    r"([\d]{1,6}[.,][\d]{2})",
+    r"(?:\d{3}\.\d{3}-[A-Z0-9]\s+\d{2}/\d{2}/\d{4}\s+)" # UC + Vencimento
+    r"([\d]{1,3}(?:\.\d{3})*[.,][\d]{2})", # Valor (ex: 2.466,53)
     re.IGNORECASE,
 )
 
@@ -56,17 +57,30 @@ REGEX_CONSUMO = re.compile(
 
 def _converter_valor_br(texto: str) -> Optional[float]:
     if not texto: return None
-    texto = texto.replace(" ", "")
-    # Scrambled text cleanup
-    if texto.count(",") > 1:
-        texto = texto.replace(",", "")
-        texto = texto[:-2] + "." + texto[-2:]
+    # Remove espaços e símbolos monetários
+    texto = texto.replace(" ", "").replace("R$", "")
     
-    texto = texto.strip()
-    if "," in texto and "." in texto:
-        texto = texto.replace(".", "").replace(",", ".")
+    # Caso 1: Formato brasileiro com ponto e virgula: 2.466,53 -> 2466.53
+    if "." in texto and "," in texto:
+        # Verifica se o ponto está antes da vírgula (milhar)
+        if texto.find(".") < texto.find(","):
+            texto = texto.replace(".", "").replace(",", ".")
+        else:
+            # Caso raro: 2,466.53 (formato US)
+            texto = texto.replace(",", "").replace(".", ".")
+    # Caso 2: Apenas vírgula: 2466,53 -> 2466.53
     elif "," in texto:
         texto = texto.replace(",", ".")
+    # Caso 3: Apenas pontos (ex: texto extraído falho ou milhar): 2.466.53 ou 2.466
+    elif "." in texto:
+        if texto.count(".") == 1:
+            # Se tiver apenas um ponto, tratamos como decimal por segurança (padrão Neoenergia)
+            # A menos que pareça um milhar sem decimal (ex: 2.466)
+            pass 
+        else:
+            # Múltiplos pontos: 1.000.000 -> 1000000
+            texto = texto.replace(".", "")
+            
     try:
         return float(texto)
     except ValueError:
@@ -148,11 +162,14 @@ def parsear_fatura(caminho_pdf: str) -> dict:
     if not p.exists(): raise FileNotFoundError(caminho_pdf)
     
     texto = _extrair_texto_pdf(str(p))
-    dados = _parsear_via_tabelas(str(p))
+    dados_tabela = _parsear_via_tabelas(str(p))
     dados_regex = _parsear_via_regex(texto)
     
-    # Merge com prioridade para tabela em campos financeiros, regex em créditos
-    for k, v in dados_regex.items():
+    # PRIORIADE TOTAL: REGEX (Captura melhor o campo "Total a Pagar" grande)
+    dados = dados_regex.copy()
+    
+    # Preenche com dados da tabela se o regex falhou ou para campos complementares
+    for k, v in dados_tabela.items():
         if k not in dados or dados[k] is None:
             dados[k] = v
 
@@ -164,17 +181,22 @@ def parsear_fatura(caminho_pdf: str) -> dict:
     # Inferência de Valores
     tarifa = dados.get("tarifa") or 0.95
     kwh = dados.get("credito_kwh")
-    reais = dados.get("credito_reais")
-
-    # Se temos kWh (do rodapé) mas não reais, calculamos
-    if kwh is not None and not reais:
+    # PRIORIDADE: Se temos kWh (do rodapé), recalculamos os REAIS para evitar capturar DIC
+    if kwh is not None and kwh > 0:
         dados["credito_reais"] = round(kwh * tarifa, 2)
-    elif reais and kwh is None:
-        dados["credito_kwh"] = int(reais / tarifa)
+        logger.debug("✅ Crédito Reais Priorizado (kWh * Tarifa): %s", dados["credito_reais"])
+    # Fallback: Se não temos kWh mas achamos reais (negativo), usamos com cautela
+    elif dados.get("credito_reais") and not kwh:
+        # Mantém o valor que veio do regex negativo
+        pass
 
-    # Valor Sem Solar
+    # Valor Sem Solar (Total Bruto que seria pago)
     if dados.get("valor_pago") is not None and dados.get("credito_reais") is not None:
-        dados["valor_sem_solar"] = round(dados.get("valor_pago") + dados.get("credito_reais"), 2)
+        dados["valor_sem_solar"] = round(float(dados.get("valor_pago")) + float(dados.get("credito_reais")), 2)
+    
+    # Fallback: se não temos valor pago mas temos crédito e tarifa
+    elif dados.get("credito_kwh") and dados.get("tarifa"):
+        dados["valor_sem_solar"] = round(dados["credito_kwh"] * dados["tarifa"], 2)
 
     # Garante campos nulos se não encontrados
     for c in ["valor_pago", "credito_kwh", "credito_reais", "valor_sem_solar", "saldo_credito", "kwh_faturado"]:

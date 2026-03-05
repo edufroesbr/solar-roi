@@ -350,17 +350,19 @@ async def autenticar(page: Page, cpf: str, senha: str, modo_auto: bool = False) 
             logger.warning("🔑 Senha não encontrada no .env. Preencha manualmente se necessário.")
 
         # 3. Resolução de CAPTCHA
+        captcha_resolvido = False
         if modo_auto:
             logger.info("Tentando resolver CAPTCHA automaticamente...")
-            sucesso_captcha = await resolver_captcha(page)
-            if not sucesso_captcha:
-                logger.warning("⚠️ Falha na automacao do CAPTCHA. Verifique a tela - Screenshot salva.")
+            captcha_resolvido = await resolver_captcha(page)
+            if not captcha_resolvido:
+                logger.warning("⚠️ Falha na automacao do CAPTCHA.")
                 await page.screenshot(path="debug_captcha_fail.png")
-
+                # Não retornamos False aqui para permitir intervenção manual abaixo
+        
         # 4. Finalização do login
         btn_entrar = page.locator("button.login-submit-button").first
         
-        if modo_auto:
+        if modo_auto and captcha_resolvido:
             # Em modo auto, tentamos clicar no botão se ele habilitar (espera pelo Angular)
             try:
                 # O reCAPTCHA leva uns segundos para soltar o botão
@@ -372,8 +374,15 @@ async def autenticar(page: Page, cpf: str, senha: str, modo_auto: bool = False) 
                     await asyncio.sleep(1)
             except:
                 pass
-
+        
         # 5. Espera redirecionamento ou Intervenção Manual
+        if not captcha_resolvido:
+            print("\n" + "!" * 50)
+            print("ACAO NECESSARIA: Resolva o CAPTCHA manualmente no navegador.")
+            print("O script aguardará o login para continuar...")
+            print("!" * 50 + "\n")
+            logger.info("Aguardando intervenção manual do usuário...")
+
         logger.info("Aguardando acesso à área logada...")
         max_wait_manual = 300 # 5 min
         
