@@ -1,0 +1,27 @@
+{
+    "_comment": "Solar ROI System - Configuration Template",
+    "investimento_total": 0.0,
+    "data_inicio": "2026-01",
+    "reajuste_anual_percent": 6.0,
+    "unidades": [
+        {
+            "uc": "00000000-0",
+            "responsavel": "Nome da Unidade",
+            "proporcao": 1.0,
+            "payload": ""
+        }
+    ],
+    "portal": {
+        "base_url": "https://agenciavirtual.neoenergiabrasilia.com.br",
+        "historico_url": "https://agenciavirtual.neoenergiabrasilia.com.br/HistoricoConsumo",
+        "rate_limit_seconds": 4,
+        "headless": false
+    },
+    "output": {
+        "json_path": "dados_faturas.json",
+        "pdf_base_dir": "faturas"
+    },
+    "filtro": {
+        "data_inicio_referencia": "2026-01"
+    }
+}

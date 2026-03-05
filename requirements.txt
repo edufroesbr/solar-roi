@@ -1,0 +1,12 @@
+# Solar ROI - Neoenergia Brasilia - Python Dependencies
+# Install with: pip install -r requirements.txt
+# After install, also run: playwright install chromium
+
+playwright>=1.41.0
+playwright-stealth>=1.0.6
+pdfplumber>=0.11.0
+python-dotenv>=1.0.0
+aiofiles>=23.2.1
+2captcha-python>=1.2.3
+pydub>=0.25.1
+SpeechRecognition>=3.10.0
