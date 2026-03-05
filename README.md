@@ -25,7 +25,7 @@ Esta ferramenta é executada localmente, garantindo que credenciais e dados fina
 
 ```bash
 # Clone o repositório
-git clone https://github.com/seu-usuario/solar-roi.git
+git clone https://github.com/edufroesbr/solar-roi.git
 cd solar-roi
 
 # Instale as dependências Python
