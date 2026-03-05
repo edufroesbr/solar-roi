@@ -15,6 +15,7 @@ error_*.png
 recaptcha_audio.mp3
 
 # Project Specific Data
+profiles/
 config.json
 dados_faturas.json
 faturas/

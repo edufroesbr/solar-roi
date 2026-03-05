@@ -346,13 +346,6 @@
         function App() {
             const [isDark, setIsDark] = useState(true);
             const [dadosJson, setDadosJson] = useState(null);
-            const [loading, setLoading] = useState(true);
-            const [error, setError] = useState(null);
-            const [filtroUnidade, setFiltroUnidade] = useState("todas");
-            const [showExport, setShowExport] = useState(false);
-            const [abertoId, setAbertoId] = useState(null); // ID do mês aberto para composição
-            const exportRef = useRef(null);
-            const COLOR_PALETTE = ["#10b981", "#0ea5e9", "#f59e0b", "#6366f1", "#ec4899", "#8b5cf6"];
 
             // Calcula dinamicamente as informações das unidades baseadas no JSON carregado
             const unidadesInfo = useMemo(() => {
@@ -378,12 +371,36 @@
                 return () => document.removeEventListener("mousedown", handleClickOutside);
             }, []);
 
+            const [perfis, setPerfis] = useState([{ id: 'BIMBATO', nome: 'Bimbato' }]);
+            const [currentProfile, setCurrentProfile] = useState('BIMBATO');
+
             useEffect(() => {
-                fetch(`dados_faturas.json?v=${Date.now()}`)
+                fetch(`profiles/perfis.json?v=${Date.now()}`)
                     .then(r => r.json())
-                    .then(d => { setDadosJson(d); setLoading(false); })
-                    .catch(e => { setError(e.message); setLoading(false); });
+                    .then(setPerfis)
+                    .catch(() => { });
             }, []);
+
+            useEffect(() => {
+                setLoading(true);
+                // Tenta carregar do perfil específico
+                fetch(`profiles/${currentProfile}/dados_faturas.json?v=${Date.now()}`)
+                    .then(r => {
+                        if (!r.ok) throw new Error('Falha ao carregar dados do perfil');
+                        return r.json();
+                    })
+                    .then(d => {
+                        setDadosJson(d);
+                        setLoading(false);
+                    })
+                    .catch(e => {
+                        // Fallback para o arquivo raiz se o perfil falhar (retrocompatibilidade)
+                        fetch(`dados_faturas.json?v=${Date.now()}`)
+                            .then(r => r.json())
+                            .then(d => { setDadosJson(d); setLoading(false); })
+                            .catch(err => { setError("Dados não encontrados para este perfil."); setLoading(false); });
+                    });
+            }, [currentProfile]);
 
             const toggleTheme = () => {
                 setIsDark(!isDark);
@@ -519,48 +536,56 @@
                                 </div>
                             </div>
                             <div className="no-print" style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                                <select className="select-premium" value={filtroUnidade} onChange={e => setFiltroUnidade(e.target.value)}>
-                                    <option value="todas">Visão Global</option>
-                                    {Object.entries(unidadesInfo).map(([id, info]) => <option key={id} value={id}>{info.nome}</option>)}
-                                </select>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    <span style={{ fontSize: 10, fontWeight: 900, color: 'rgba(255,255,255,0.6)', marginLeft: 4 }}>UNIDADE</span>
+                                    <select className="select-premium" value={filtroUnidade} onChange={e => setFiltroUnidade(e.target.value)}>
+                                        <option value="todas">Visão Global</option>
+                                        {Object.entries(unidadesInfo).map(([id, info]) => <option key={id} value={id}>{info.nome}</option>)}
+                                    </select>
+                                </div>
 
-                                <div className="dropdown-container" ref={exportRef}>
+                                <div className="dropdown-container" ref={exportRef} style={{ marginTop: 12 }}>
                                     <button className="btn-premium btn-primary" onClick={() => setShowExport(!showExport)}>
-                                        📥 Exportar / Lote &nbsp; ▼
+                                        📥 Exportar &nbsp; ▼
                                     </button>
                                     <div className={`dropdown-menu ${showExport ? 'show' : ''}`}>
                                         <button className="dropdown-item" onClick={() => { window.print(); setShowExport(false); }}>
-                                            <i>🖨️</i> Imprimir Vista Atual (PDF)
-                                        </button>
-                                        <button className="dropdown-item" onClick={async () => {
-                                            try {
-                                                const res = await fetch('http://localhost:8889/imprimir-lote', { method: 'POST' });
-                                                const data = await res.json();
-                                                alert(data.mensagem);
-                                            } catch (e) {
-                                                alert('Erro ao conectar com o servidor de utilidades (backend_utils.py). Certifique-se que ele está rodando na porta 8889.');
-                                            }
-                                            setShowExport(false);
-                                        }}>
-                                            <i>📂</i> <strong>Imprimir Lote (Automático)</strong>
+                                            <i>🖨️</i> Imprimir (PDF)
                                         </button>
                                         <div className="dropdown-divider"></div>
                                         <button className="dropdown-item" onClick={() => { exportCSV(); setShowExport(false); }}>
-                                            <i>📊</i> Exportar CSV (Vista Atual)
-                                        </button>
-                                        <button className="dropdown-item" onClick={() => { exportXML(); setShowExport(false); }}>
-                                            <i>📄</i> Exportar XML (Vista Atual)
+                                            <i>📊</i> Exportar CSV
                                         </button>
                                     </div>
                                 </div>
 
-                                <button className="theme-toggle" onClick={toggleTheme}>{isDark ? "🌙" : "☀️"}</button>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    <span style={{ fontSize: 10, fontWeight: 900, color: 'rgba(255,255,255,0.6)', marginLeft: 4 }}>USUÁRIO</span>
+                                    <select
+                                        className="select-premium"
+                                        style={{ borderColor: 'var(--accent)' }}
+                                        value={currentProfile}
+                                        onChange={(e) => setCurrentProfile(e.target.value)}
+                                    >
+                                        {perfis.map(p => (
+                                            <option key={p.id} value={p.id}>{p.nome}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <button className="theme-toggle" style={{ marginTop: 12 }} onClick={toggleTheme}>{isDark ? "🌙" : "☀️"}</button>
                             </div>
                         </div>
                     </header>
 
                     <main className="container animate-in">
-                        <div className="grid-main" style={{ marginTop: "-60px" }}>
+                        {error && (
+                            <div className="glass" style={{ marginBottom: 20, borderColor: 'var(--danger)', background: 'rgba(239, 68, 68, 0.1)', textAlign: 'center' }}>
+                                <span style={{ color: 'var(--danger)', fontWeight: 800 }}>⚠️ {error}</span>
+                                <p style={{ fontSize: 12, marginTop: 8 }}>Verifique se a extração foi concluída para este perfil.</p>
+                            </div>
+                        )}
+                        <div className="grid-main" style={{ marginTop: error ? "0px" : "-60px" }}>
                             <div className="col-3 glass" style={{ borderTop: '4px solid var(--primary)' }}>
                                 <span className="metric-title">INVESTIMENTO TOTAL</span>
                                 <span className="metric-sub">Capital total alocado para a infraestrutura da usina.</span>

@@ -8,18 +8,20 @@ logger = logging.getLogger(__name__)
 
 # Sincronização automática
 
-def sync():
-    json_path = Path("dados_faturas.json")
+def sync(profile="BIMBATO", cleanup=True):
+    profile_path = Path(f"profiles/{profile}")
+    json_path = profile_path / "dados_faturas.json"
+    
     if not json_path.exists():
-        logger.error("Arquivo dados_faturas.json não encontrado.")
+        logger.error(f"Arquivo dados_faturas.json não encontrado para o perfil {profile}.")
         return
 
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    faturas_dir = Path("faturas")
+    faturas_dir = profile_path / "faturas"
     if not faturas_dir.exists():
-        logger.error("Diretório faturas/ não encontrado.")
+        logger.info(f"Diretório de faturas do perfil {profile} está vazio ou não existe.")
         return
 
     novas_sincronizadas = 0
@@ -58,6 +60,14 @@ def sync():
                     }
                     unidade_data["faturas"].append(nova_fatura)
                     novas_sincronizadas += 1
+                
+                # LIMPEZA: Remove o PDF após sincronizar com o JSON
+                if cleanup:
+                    try:
+                        pdf_file.unlink()
+                        logger.info(f"PDF removido após sincronização: {pdf_file.name}")
+                    except Exception as e:
+                        logger.error(f"Erro ao remover PDF {pdf_file}: {e}")
             
             except Exception as e:
                 logger.error(f"Erro ao processar {pdf_file}: {e}")
