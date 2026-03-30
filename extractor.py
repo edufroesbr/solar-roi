@@ -52,10 +52,10 @@ logger = logging.getLogger("extractor")
 # Configuração
 # ---------------------------------------------------------------------------
 PROFILES_ROOT = Path("profiles")
-CURRENT_PROFILE = "BIMBATO"
+CURRENT_PROFILE = "PADRAO"
 BASE_URL = "https://agenciavirtual.neoenergiabrasilia.com.br"
 RATE_LIMIT_SECONDS = 4
-DATA_INICIO_FILTRO = "2026-01"
+DATA_INICIO_FILTRO = "2025-10"
 
 def get_config_path() -> Path: return PROFILES_ROOT / CURRENT_PROFILE / "config.json"
 def get_dados_path() -> Path: return PROFILES_ROOT / CURRENT_PROFILE / "dados_faturas.json"
@@ -289,36 +289,60 @@ async def extrair_tabela_historico(page: Page, mes_filtro: str = None) -> List[d
         await page.wait_for_selector("#protocolos, table.table, .dataTables_wrapper", timeout=20000)
     except: return []
 
-    rows = page.locator("table tbody tr")
-    count = await rows.count()
     lista = []
-    
-    for i in range(count):
-        cells = rows.nth(i).locator("td")
-        if await cells.count() < 7: continue
+    while True:
+        # Pega as linhas atuais
+        rows = page.locator("table tbody tr")
+        count = await rows.count()
         
-        texto_ref = (await cells.nth(0).inner_text()).strip()
-        referencia = _normalizar_ref(texto_ref)
-        if not referencia: continue
-        if mes_filtro and mes_filtro != referencia: continue
-        
-        # Busca link do PDF (ícone de Olho Verde)
-        pdf_url = ""
-        link = cells.locator("a[href*='SegundaVia']").first
-        if await link.count() > 0:
-            pdf_url = urljoin(BASE_URL, await link.get_attribute("href"))
+        achou_antigo = False
+        for i in range(count):
+            cells = rows.nth(i).locator("td")
+            if await cells.count() < 7: continue
             
-        fatura = {
-            "mes": texto_ref,
-            "referencia": referencia,
-            "kwh_faturado": _limpar_valor(await cells.nth(5).inner_text()),
-            "valor_pago": _limpar_valor(await cells.nth(6).inner_text()),
-            "vencimento": (await cells.nth(7).inner_text()).strip(),
-            "pdf_url": pdf_url
-        }
-        lista.append(fatura)
-        logger.info("   Fatura detectada: %s", referencia)
-    
+            texto_ref = (await cells.nth(0).inner_text()).strip()
+            referencia = _normalizar_ref(texto_ref)
+            if not referencia: continue
+            
+            # Se for anterior ao início configurado, encerra a busca
+            if referencia < DATA_INICIO_FILTRO:
+                achou_antigo = True
+                continue
+
+            # Evita duplicatas se estivermos em loop de páginas
+            if any(f["referencia"] == referencia for f in lista):
+                continue
+                
+            if mes_filtro and mes_filtro != referencia: continue
+            
+            pdf_url = ""
+            link = cells.locator("a[href*='SegundaVia']").first
+            if await link.count() > 0:
+                pdf_url = urljoin(BASE_URL, await link.get_attribute("href"))
+                
+            fatura = {
+                "mes": texto_ref,
+                "referencia": referencia,
+                "kwh_faturado": _limpar_valor(await cells.nth(5).inner_text()),
+                "valor_pago": _limpar_valor(await cells.nth(6).inner_text()),
+                "vencimento": (await cells.nth(7).inner_text()).strip(),
+                "pdf_url": pdf_url
+            }
+            lista.append(fatura)
+            logger.info("   Fatura detectada: %s", referencia)
+        
+        if achou_antigo:
+            break
+            
+        # Tenta clicar no botão "Próximo" ou "Ver Mais"
+        btn_prox = page.locator("a:has-text('Próximo'), .paginate_button.next, a:has-text('>')").first
+        if await btn_prox.is_visible() and await btn_prox.is_enabled():
+            logger.info("   Clicando em 'Próximo' para buscar mais datas...")
+            await _clicar_humanizado(page, btn_prox)
+            await asyncio.sleep(4)
+        else:
+            break
+            
     return lista
 
 async def baixar_pdf(page: Page, uc: str, ref: str, url: str) -> Optional[str]:
@@ -430,6 +454,6 @@ if __name__ == "__main__":
     p.add_argument("--mes")
     p.add_argument("--todos", action="store_true")
     p.add_argument("--uc")
-    p.add_argument("--profile", default="BIMBATO")
+    p.add_argument("--profile", default="PADRAO")
     p.add_argument("--auto", action="store_true")
     asyncio.run(main(p.parse_args()))

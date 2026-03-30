@@ -346,6 +346,12 @@
         function App() {
             const [isDark, setIsDark] = useState(true);
             const [dadosJson, setDadosJson] = useState(null);
+            const [filtroUnidade, setFiltroUnidade] = useState("todas");
+            const [showExport, setShowExport] = useState(false);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [abertoId, setAbertoId] = useState(null);
+            const exportRef = useRef(null);
 
             // Calcula dinamicamente as informações das unidades baseadas no JSON carregado
             const unidadesInfo = useMemo(() => {

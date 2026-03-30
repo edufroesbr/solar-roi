@@ -1,673 +1,432 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-    Tooltip, Legend, ResponsiveContainer, ReferenceLine, Area, AreaChart, ComposedChart
+    Tooltip as RechartsTooltip, Legend, ResponsiveContainer, ReferenceLine, Area, AreaChart, ComposedChart, Cell
 } from "recharts";
 
-// ─── CONSTANTES ───────────────────────────────────────────────────────────────
+// ─── STITCH DESIGN TOKENS (PREMIUM MODO CLARO) ──────────────────────────────
+const COLORS = {
+    green: "#4db886",
+    blue: "#5da0d6",
+    gold: "#b38b4d",
+    gray: "#6b7280",
+    white: "#ffffff",
+    surface: "#f8fafc",
+    textSlate: "#334155",
+    textDark: "#1e293b",
+};
 
-// ─── CONSTANTES ───────────────────────────────────────────────────────────────
-const COLOR_PALETTE = ["#00A36C", "#0077B6", "#F4A261", "#9B5DE5", "#E63946", "#F15BB5"];
-const LS_KEY = "solar_roi_faturas_manuais";
-
-// ─── PROJEÇÃO ─────────────────────────────────────────────────────────────────
-function gerarProjecao(unidadesInfo, meses = 18, reajuste = 0.06) {
-    const resultado = [];
-    const mesInicio = new Date(2026, 2);
-    const ucs = Object.keys(unidadesInfo);
-
-    // Base de cálculo para projeção baseada em médias ou valores padrão se vazio
-    const basePorUC = {};
-    ucs.forEach(uc => {
-        basePorUC[uc] = 137.5 / ucs.length; // Valor base genérico total distribuído
-    });
-
-    for (let i = 0; i < meses; i++) {
-        const d = new Date(mesInicio);
-        d.setMonth(d.getMonth() + i);
-        const label = d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }).replace(". ", "/");
-        const fator = Math.pow(1 + reajuste, i / 12);
-
-        const ponto = { mes: label, total: 0, projecao: true };
-        ucs.forEach((uc, idx) => {
-            const val = basePorUC[uc] * fator;
-            ponto[`cred_${uc}`] = val;
-            ponto.total += val;
-        });
-
-        resultado.push(ponto);
-    }
-    return resultado;
-}
-
-// ─── CONVERSÕES ───────────────────────────────────────────────────────────────
-function faturasJsonParaLista(dados) {
-    const lista = [];
-    if (!dados || !dados.unidades) return lista;
-    Object.entries(dados.unidades).forEach(([uc, info]) => {
-        (info.faturas || []).forEach(f => {
-            lista.push({
-                uc,
-                mes: f.mes,
-                kwh: f.kwh_faturado,
-                pago: f.valor_pago,
-                semSolar: f.valor_sem_solar,
-                credito: f.credito_reais,
-                vencimento: f.vencimento,
-                data_pagamento: f.data_pagamento,
-                dias_atraso: f.dias_atraso,
-                pdf_path: f.pdf_path,
-                fonte: f.fonte || "extraido",
-            });
-        });
-    });
-    return lista;
-}
-
-function consolidarMeses(faturas, ucs) {
-    const mapa = {};
-    faturas.forEach(f => {
-        if (!mapa[f.mes]) {
-            mapa[f.mes] = { mes: f.mes, total: 0 };
-            ucs.forEach(uc => mapa[f.mes][`cred_${uc}`] = 0);
-        }
-        mapa[f.mes][`cred_${f.uc}`] = (mapa[f.mes][`cred_${f.uc}`] || 0) + (f.credito || 0);
-        mapa[f.mes].total += (f.credito || 0);
-    });
-    return Object.values(mapa);
-}
-
-function calcularSaldoDevedor(historico, projecao, investimento) {
-    let saldo = investimento;
-    return [...historico, ...projecao].map(m => {
-        saldo = Math.max(0, saldo - m.total);
-        return { ...m, saldo: +saldo.toFixed(2), investido: +(investimento - saldo).toFixed(2) };
-    });
-}
+const COLOR_PALETTE = ["#4db886", "#5da0d6", "#b38b4d", "#9334E6", "#12B5CB", "#E8710A"];
 
 // ─── FORMATAÇÃO ───────────────────────────────────────────────────────────────
-const fmt = v => `R$ ${(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt = v => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+const fmtKwh = v => `${(v || 0).toLocaleString('pt-BR')} kWh`;
+const fmtPercentShort = v => new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(v || 0);
+const fmtPercentLong = v => new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(v || 0);
+
+// ─── EXPORTAÇÃO CSV ───────────────────────────────────────────────────────────
+const exportToCSV = (data, filename) => {
+    if (!data.length) return;
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+        headers.join(","),
+        ...data.map(row => headers.map(h => `"${(row[h] || "").toString().replace(/"/g, '""')}"`).join(","))
+    ].join("\n");
+
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+};
 
 // ─── COMPONENTES ─────────────────────────────────────────────────────────────
 
-function Card({ label, value, sub, color = "#00A36C" }) {
+function KPICard({ label, value, sub, bgColor, borderColor, textColor, trendIcon }) {
     return (
-        <div style={{
-            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 16, padding: "20px 24px", flex: 1, minWidth: 160,
-            borderTop: `3px solid ${color}`, backdropFilter: "blur(10px)"
-        }}>
-            <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>{label}</div>
-            <div style={{ fontSize: 26, fontWeight: 800, color: "#fff", lineHeight: 1.1 }}>{value}</div>
-            {sub && <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{sub}</div>}
+        <div className={`rounded-3xl p-6 flex flex-col justify-between shadow-[0_4px_20px_rgba(0,0,0,0.04)] border-2 ${bgColor} ${borderColor}`}>
+            <h3 className="text-[11px] font-bold text-slate-500 mb-2 uppercase tracking-[1px]">{label}</h3>
+            <div>
+                <div className={`text-3xl font-bold ${textColor} mb-1 tracking-tight text-slate-800`}>{value}</div>
+                <div className={`text-[13px] font-medium ${textColor} flex items-center gap-1 opacity-90`}>
+                    {trendIcon}
+                    {sub}
+                </div>
+            </div>
         </div>
     );
 }
 
-const TooltipCustom = ({ active, payload, label }) => {
+const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null;
     return (
-        <div style={{ background: "#111", border: "1px solid #333", borderRadius: 10, padding: "12px 16px", fontSize: 13 }}>
-            <div style={{ color: "#aaa", marginBottom: 6, fontWeight: 700 }}>{label}</div>
+        <div className="bg-white/95 backdrop-blur-md border border-slate-200 rounded-2xl p-4 shadow-xl text-sm">
+            <div className="font-bold text-slate-800 mb-2 border-b pb-1 border-slate-100">{label}</div>
             {payload.map((p, i) => (
-                <div key={i} style={{ color: p.color, marginBottom: 2 }}>
-                    {p.name}: <b>{fmt(p.value)}</b>
+                <div key={i} className="flex justify-between gap-6 mb-1.5">
+                    <span className="text-slate-500 flex items-center gap-2 font-medium">
+                        <span className="w-2 h-2 rounded-full" style={{ background: p.color }}></span>
+                        {p.name}:
+                    </span>
+                    <span className="font-bold" style={{ color: p.color }}>{fmt(p.value)}</span>
                 </div>
             ))}
         </div>
     );
 };
 
-// Indicador de fonte da fatura
-function FonteBadge({ fonte }) {
-    const isManual = fonte === "manual";
-    return (
-        <span style={{
-            fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
-            background: isManual ? "#F4A26122" : "#00A36C22",
-            color: isManual ? "#F4A261" : "#00A36C",
-            border: `1px solid ${isManual ? "#F4A26144" : "#00A36C44"}`,
-            letterSpacing: 0.5,
-        }}>
-            {isManual ? "MANUAL" : "AUTO"}
-        </span>
-    );
-}
-
 // ─── APP PRINCIPAL ────────────────────────────────────────────────────────────
 export default function App() {
-    // Estado de dados
     const [dadosJson, setDadosJson] = useState(null);
     const [carregando, setCarregando] = useState(true);
-    const [erroCarregamento, setErroCarregamento] = useState(null);
     const [faturasExtradas, setFaturasExtradas] = useState([]);
-    const [faturasManuals, setFaturasManuals] = useState([]);
-
-    // Parâmetros
     const [investimento, setInvestimento] = useState(22900);
-    const [reajuste, setReajuste] = useState(6);
-    const [proporcoes, setProporcoes] = useState({});
-    const [aba, setAba] = useState("visao");
-    const [novaFatura, setNovaFatura] = useState({ uc: "", mes: "", kwh: "", pago: "", semSolar: "" });
+    const [expandidoId, setExpandidoId] = useState(null);
 
-    // ── Calcula dinamicamente as informações das unidades ──────────────────────
-    const unidadesInfo = useMemo(() => {
-        if (!dadosJson || !dadosJson.unidades) return {};
-        const info = {};
-        Object.keys(dadosJson.unidades).forEach((uc, index) => {
-            info[uc] = {
-                nome: dadosJson.unidades[uc].responsavel || uc,
-                cor: COLOR_PALETTE[index % COLOR_PALETTE.length],
-                proporcao: dadosJson.unidades[uc].proporcao || 0
-            };
-        });
-        return info;
-    }, [dadosJson]);
-
-    // ── Carregamento dinâmico do JSON ──────────────────────────────────────────
+    // Carregamento de dados
     useEffect(() => {
         fetch("dados_faturas.json")
-            .then(res => {
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                return res.json();
-            })
+            .then(res => res.json())
             .then(dados => {
                 setDadosJson(dados);
                 setInvestimento(dados.investimento_total || 22900);
-                setFaturasExtradas(faturasJsonParaLista(dados));
-
-                const initialProps = {};
-                Object.entries(dados.unidades || {}).forEach(([uc, info]) => {
-                    initialProps[uc] = info.proporcao * 100 || 0;
+                const lista = [];
+                const todosMeses = new Set();
+                
+                Object.values(dados.unidades || {}).forEach(info => {
+                    (info.faturas || []).forEach(f => todosMeses.add(f.mes));
                 });
-                setProporcoes(initialProps);
-                if (Object.keys(dados.unidades || {}).length > 0) {
-                    setNovaFatura(prev => ({ ...prev, uc: Object.keys(dados.unidades)[0] }));
-                }
 
+                Object.entries(dados.unidades || {}).forEach(([uc, info]) => {
+                    const faturasDaUc = info.faturas || [];
+                    const mesesDaUc = faturasDaUc.map(f => f.mes);
+                    
+                    faturasDaUc.forEach(f => {
+                        lista.push({
+                            uc,
+                            mes: f.mes,
+                            referencia: f.referencia,
+                            kwh: f.kwh_faturado || 0,
+                            pago: f.valor_pago || 0,
+                            semSolar: f.valor_sem_solar || 0,
+                            credito: f.credito_reais > 0 ? f.credito_reais : (f.valor_sem_solar > f.valor_pago ? f.valor_sem_solar - f.valor_pago : 0),
+                            responsavel: info.responsavel || uc
+                        });
+                    });
+
+                    todosMeses.forEach(mes => {
+                        if (!mesesDaUc.includes(mes)) {
+                            lista.push({
+                                uc,
+                                mes: mes,
+                                referencia: mes.split('/').reverse().join('-'),
+                                kwh: 0,
+                                pago: 0,
+                                semSolar: 0,
+                                credito: 0,
+                                responsavel: info.responsavel || uc,
+                                missing: true
+                            });
+                        }
+                    });
+                });
+                setFaturasExtradas(lista);
                 setCarregando(false);
             })
             .catch(err => {
-                setErroCarregamento(err.message);
+                console.error(err);
                 setCarregando(false);
             });
     }, []);
 
-    // ── Restaura faturas manuais do localStorage ──────────────────────────────
-    useEffect(() => {
-        try {
-            const salvas = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
-            setFaturasManuals(salvas);
-        } catch {
-            setFaturasManuals([]);
-        }
-    }, []);
-
-    // ── Faturas consolidadas (extraídas + manuais) ────────────────────────────
-    const faturas = useMemo(() => [...faturasExtradas, ...faturasManuals], [faturasExtradas, faturasManuals]);
-    const ucs = useMemo(() => Object.keys(unidadesInfo), [unidadesInfo]);
-
-    const historico = useMemo(() => consolidarMeses(faturas, ucs), [faturas, ucs]);
-    const projecao = useMemo(() => gerarProjecao(unidadesInfo, 18, reajuste / 100), [unidadesInfo, reajuste]);
-    const serieSaldo = useMemo(() => calcularSaldoDevedor(historico, projecao, investimento), [historico, projecao, investimento]);
-
-    const totalEconomizado = historico.reduce((a, m) => a + m.total, 0);
-    const saldoAtual = investimento - totalEconomizado;
-    const idxBreakeven = serieSaldo.findIndex(m => m.saldo === 0);
-    const mesBreakeven = idxBreakeven >= 0 ? serieSaldo[idxBreakeven].mes : "Em cálculo...";
-    const mediaEconomia = historico.length > 0 ? totalEconomizado / historico.length : 0;
-    const mesesRestantes = mediaEconomia > 0 ? Math.ceil(saldoAtual / mediaEconomia) : "—";
-
-    const tabelaDetalhada = useMemo(() => {
-        const meses = [...new Set(faturas.map(f => f.mes))].sort((a, b) => {
-            const [mA, aA] = a.split('/');
-            const [mB, aB] = b.split('/');
-            return new Date(aB, mB - 1) - new Date(aA, mA - 1);
+    const ucs = useMemo(() => dadosJson ? Object.keys(dadosJson.unidades) : [], [dadosJson]);
+    const unidadesInfo = useMemo(() => {
+        const info = {};
+        ucs.forEach((uc, i) => {
+            const label = dadosJson.unidades[uc].apelido || dadosJson.unidades[uc].responsavel;
+            info[uc] = {
+                nome: label ? `${uc} - ${label}` : uc,
+                cor: COLOR_PALETTE[i % COLOR_PALETTE.length]
+            };
         });
+        return info;
+    }, [ucs, dadosJson]);
+
+    const totalEconomizado = useMemo(() => faturasExtradas.reduce((a, f) => a + (f.credito || 0), 0), [faturasExtradas]);
+    const mesesAtivos = useMemo(() => [...new Set(faturasExtradas.filter(f => (f.credito || 0) > 0).map(f => f.mes))].length, [faturasExtradas]);
+    const numMesesTotal = useMemo(() => [...new Set(faturasExtradas.map(f => f.mes))].length, [faturasExtradas]);
+    const mediaMensal = useMemo(() => mesesAtivos > 0 ? totalEconomizado / mesesAtivos : 0, [totalEconomizado, mesesAtivos]);
+    
+    const mesesRestantes = useMemo(() => {
+        const saldo = investimento - totalEconomizado;
+        return mediaMensal > 0 ? Math.ceil(saldo / mediaMensal) : 0;
+    }, [investimento, totalEconomizado, mediaMensal]);
+
+    const playbackDate = useMemo(() => {
+        if (mesesRestantes <= 0) return "Conciliado";
+        const d = new Date();
+        d.setMonth(d.getMonth() + mesesRestantes);
+        return d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    }, [mesesRestantes]);
+
+    // Histórico mensal acumulado para o gráfico
+    const historicoMensal = useMemo(() => {
+        const meses = [...new Set(faturasExtradas.map(f => f.mes))].sort((a, b) => {
+            const [mA, yA] = a.split('/').map(Number);
+            const [mB, yB] = b.split('/').map(Number);
+            return (yA * 100 + mA) - (yB * 100 + mB);
+        });
+
+        let acumulado = 0;
         return meses.map(mes => {
-            const row = { mes };
-            ucs.forEach(uc => {
-                const f = faturas.find(x => x.uc === uc && x.mes === mes);
-                row[uc] = f ? { pago: f.pago, credito: f.credito, kwh: f.kwh, fonte: f.fonte } : null;
-            });
-            row.totalCredito = ucs.reduce((a, uc) => a + (row[uc]?.credito || 0), 0);
-            return row;
+            const faturasMes = faturasExtradas.filter(f => f.mes === mes);
+            const ganhoMes = faturasMes.reduce((a, f) => a + (f.credito || 0), 0);
+            acumulado += ganhoMes;
+            return { 
+                mes, 
+                ganho: ganhoMes, 
+                acumulado: acumulado, 
+                restante: Math.max(0, investimento - acumulado) 
+            };
         });
-    }, [faturas, ucs]);
+    }, [faturasExtradas, investimento]);
 
-    // ── Adicionar fatura manual ───────────────────────────────────────────────
-    const adicionarFatura = useCallback(() => {
-        if (!novaFatura.mes || !novaFatura.kwh || !novaFatura.pago) return;
-        const credito = parseFloat(novaFatura.semSolar) - parseFloat(novaFatura.pago);
-        const nova = {
-            uc: novaFatura.uc,
-            mes: novaFatura.mes,
-            kwh: parseFloat(novaFatura.kwh),
-            pago: parseFloat(novaFatura.pago),
-            semSolar: parseFloat(novaFatura.semSolar),
-            credito: parseFloat(credito.toFixed(2)),
-            fonte: "manual",
-        };
-        const atualizadas = [...faturasManuals, nova];
-        setFaturasManuals(atualizadas);
-        try {
-            localStorage.setItem(LS_KEY, JSON.stringify(atualizadas));
-        } catch {/* quota atingida */ }
-        setNovaFatura({ uc: ucs[0] || "", mes: "", kwh: "", pago: "", semSolar: "" });
-    }, [novaFatura, faturasManuals, ucs]);
+    const handleExportFull = () => {
+        const data = faturasExtradas.map(f => ({
+            Unidade: unidadesInfo[f.uc].nome,
+            Mes: f.mes,
+            Consumo: f.kwh,
+            Pago: f.pago,
+            Recuperado: f.credito,
+            '% Investimento': fmtPercentLong(f.credito / investimento)
+        }));
+        exportToCSV(data, "SolarROI_Historico_Completo.csv");
+    };
 
-    // ── Exportações ───────────────────────────────────────────────────────────
-    const exportarCSV = useCallback(() => {
-        const linhas = [["Mês", "UC", "Responsável", "kWh", "Pago (R$)", "Sem Solar (R$)", "Crédito (R$)", "Fonte"]];
-        faturas.forEach(f => {
-            linhas.push([
-                f.mes, f.uc, unidadesInfo[f.uc]?.nome || f.uc,
-                f.kwh, f.pago, f.semSolar, f.credito, f.fonte,
-            ]);
-        });
-        const csv = "\uFEFF" + linhas.map(l => l.join(";")).join("\n");
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = "roi_solar_neoenergia.csv"; a.click();
-        URL.revokeObjectURL(url);
-    }, [faturas, unidadesInfo]);
-
-    const exportarJSON = useCallback(() => {
-        if (!dadosJson) return;
-        const blob = new Blob([JSON.stringify(dadosJson, null, 2)], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = "dados_faturas.json"; a.click();
-        URL.revokeObjectURL(url);
-    }, [dadosJson]);
-
-    const imprimirRelatorio = useCallback(() => {
-        window.print();
-    }, []);
-
-    // ── Loading & Erro ────────────────────────────────────────────────────────
-    if (carregando) {
-        return (
-            <div style={{ background: "#0a0a0a", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#00A36C", fontFamily: "monospace", fontSize: 18 }}>
-                <div style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 48, marginBottom: 16 }}>☀️</div>
-                    <div>Carregando dados do sistema solar...</div>
-                </div>
-            </div>
-        );
-    }
-
-    if (erroCarregamento) {
-        return (
-            <div style={{ background: "#0a0a0a", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#E63946", fontFamily: "monospace", fontSize: 14, padding: 40 }}>
-                <div style={{ textAlign: "center", maxWidth: 500 }}>
-                    <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
-                    <div style={{ color: "#E63946", fontSize: 18, marginBottom: 12 }}>Erro ao carregar dados</div>
-                    <div style={{ color: "#666", marginBottom: 24 }}>{erroCarregamento}</div>
-                    <div style={{ color: "#555", fontSize: 12 }}>
-                        Verifique se o arquivo <code style={{ color: "#00A36C" }}>dados_faturas.json</code> está no mesmo diretório que o dashboard.
-                        <br /><br />
-                        Execute o extrator para gerar o arquivo: <br />
-                        <code style={{ color: "#0077B6" }}>python extractor.py --todos</code>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    const abas = [
-        { id: "visao", label: "📊 Visão Geral" },
-        { id: "evolucao", label: "📈 Evolução" },
-        { id: "tabela", label: "🧾 Faturas" },
-        { id: "config", label: "⚙️ Configurar" },
-    ];
+    if (carregando) return <div className="flex h-screen items-center justify-center text-slate-300 font-bold text-xl uppercase tracking-widest animate-pulse font-sans">☀️ Sincronizando Stitch Database...</div>;
 
     return (
-        <div style={{
-            fontFamily: "'DM Mono', 'Courier New', monospace",
-            background: "#0a0a0a", minHeight: "100vh", color: "#e0e0e0",
-            padding: "0 0 60px"
-        }}>
-
-            {/* ── HEADER ─────────────────────────────────────────────────────────── */}
-            <div style={{
-                background: "linear-gradient(135deg, #001a0e 0%, #003320 50%, #001a0e 100%)",
-                borderBottom: "1px solid #00A36C33",
-                padding: "28px 40px 24px", position: "relative", overflow: "hidden"
-            }}>
-                <div style={{
-                    position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: 0.04,
-                    backgroundImage: "repeating-linear-gradient(0deg, #00A36C 0, #00A36C 1px, transparent 1px, transparent 40px), repeating-linear-gradient(90deg, #00A36C 0, #00A36C 1px, transparent 1px, transparent 40px)"
-                }} />
-                <div style={{ position: "relative" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 4 }}>
-                        <div style={{ fontSize: 28 }}>☀️</div>
-                        <div>
-                            <div style={{ fontSize: 22, fontWeight: 900, color: "#fff", letterSpacing: -0.5 }}>
-                                ROI Solar — Neoenergia Brasília
-                            </div>
-                            <div style={{ fontSize: 12, color: "#00A36C", letterSpacing: 2 }}>
-                                USINA FOTOVOLTAICA · RETORNO DE INVESTIMENTO · 3 UNIDADES
-                            </div>
-                        </div>
+        <div className="p-10 antialiased bg-[#f8fafc] min-h-screen text-slate-700 font-sans print:bg-white print:p-0">
+            
+            {/* ── HEADER Premium ─────────────────────────────────────────────── */}
+            <header className="flex justify-between items-center mb-6 bg-white/70 p-5 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl border border-white/60 sticky top-0 z-50">
+                <div className="flex items-center gap-5">
+                    <div className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center text-white shadow-lg overflow-hidden">
+                        <svg className="w-7 h-7" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3a2.5 2.5 0 0 1 2.5 2.5c0 .28-.05.55-.14.8l2.9 1.45A1.99 1.99 0 0 1 19 9.5V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V9.5c0-.85.53-1.58 1.28-1.87l2.86-1.43c-.09-.25-.14-.52-.14-.8A2.5 2.5 0 0 1 12 3zm0 2a.5.5 0 0 0-.5.5c0 .28.22.5.5.5s.5-.22.5-.5a.5.5 0 0 0-.5-.5zm5 5.5h-10v8h10v-8zm-6 2v4H9v-4h2zm4 0v4h-2v-4h2z"></path></svg>
                     </div>
-                    <div style={{ display: "flex", gap: 20, marginTop: 8 }}>
-                        <span style={{ fontSize: 11, color: "#555" }}>{ucs.join(' · ')}</span>
-                        <span style={{ fontSize: 11, color: "#555" }}>•</span>
-                        <span style={{ fontSize: 11, color: "#555" }}>Relatório Gerencial Usina Solar</span>
-                        {erroCarregamento === null && (
-                            <span style={{ fontSize: 11, color: "#00A36C55" }}>• dados_faturas.json ✓</span>
-                        )}
+                    <div>
+                        <h1 className="text-2xl font-serif-title text-slate-800 tracking-tight leading-none mb-1">
+                            ROI SOLAR <span className="text-[#b38b4d] italic">PREMIUM</span>
+                        </h1>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Intelligence Engine • Modo Claro</p>
                     </div>
                 </div>
-            </div>
-
-            {/* ── ABAS ───────────────────────────────────────────────────────────── */}
-            <div style={{ display: "flex", gap: 2, padding: "0 40px", background: "#0f0f0f", borderBottom: "1px solid #1a1a1a", flexWrap: "wrap" }}>
-                {abas.map(a => (
-                    <button key={a.id} onClick={() => setAba(a.id)} style={{
-                        background: aba === a.id ? "#00A36C" : "transparent",
-                        color: aba === a.id ? "#000" : "#666",
-                        border: "none", borderRadius: "0 0 8px 8px", padding: "10px 20px",
-                        fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                        letterSpacing: 0.5, transition: "all 0.2s"
-                    }}>{a.label}</button>
-                ))}
-                {/* Botões de exportação */}
-                <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center", padding: "6px 0" }}>
-                    <button onClick={exportarCSV} style={{ background: "transparent", color: "#00A36C", border: "1px solid #00A36C44", borderRadius: 8, padding: "7px 14px", fontFamily: "inherit", fontSize: 11, cursor: "pointer" }}>⬇ CSV</button>
-                    <button onClick={exportarJSON} style={{ background: "transparent", color: "#0077B6", border: "1px solid #0077B644", borderRadius: 8, padding: "7px 14px", fontFamily: "inherit", fontSize: 11, cursor: "pointer" }}>⬇ JSON</button>
-                    <button onClick={imprimirRelatorio} style={{ background: "transparent", color: "#888", border: "1px solid #33333344", borderRadius: 8, padding: "7px 14px", fontFamily: "inherit", fontSize: 11, cursor: "pointer" }}>🖨 Imprimir</button>
+                <div className="flex items-center gap-4 no-print">
+                    <div className="flex bg-slate-100 p-1 rounded-full border border-slate-200 shadow-inner">
+                        <button onClick={handleExportFull} className="px-5 py-2 text-[10px] font-black text-slate-600 hover:bg-white hover:shadow-sm rounded-full transition-all uppercase tracking-widest">CSV</button>
+                        <button onClick={() => window.print()} className="px-5 py-2 text-[10px] font-black text-slate-600 hover:bg-white hover:shadow-sm rounded-full transition-all uppercase tracking-widest">PDF</button>
+                    </div>
+                    <div className="h-12 w-12 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-600 shadow-sm overflow-hidden p-0.5">
+                         <div className="w-full h-full rounded-full bg-slate-50 flex items-center justify-center font-bold text-xs">EF</div>
+                    </div>
                 </div>
+            </header>
+
+            {/* Subtítulo Narrativo */}
+            <div className="mb-10 px-2">
+                <h2 className="text-[13px] font-bold text-slate-500 uppercase tracking-[2px] mb-2 flex items-center gap-3">
+                    <span className="w-8 h-[2px] bg-[#b38b4d]"></span>
+                    Status de Monitoramento da Usina
+                </h2>
+                <p className="text-slate-400 text-sm leading-relaxed max-w-3xl">
+                    Análise consolidada de <span className="text-slate-800 font-bold">{ucs.length} unidades</span> beneficiárias. 
+                    Com base na média de economia de <span className="text-[#4db886] font-bold">{fmt(mediaMensal)}/mês</span>, 
+                    projetamos a quitação total do capital investido para <span className="text-slate-800 font-black underline decoration-[#b38b4d] decoration-2">{playbackDate}</span>. 
+                    Atualmente, o sistema já recuperou <span className="text-slate-800 font-bold">{fmtPercentShort(totalEconomizado/investimento)}</span> do valor original.
+                </p>
             </div>
 
-            <div style={{ padding: "32px 40px" }}>
+            {/* ── KPI CARDS ────────────────────────────────────────────────────── */}
+            <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+                <KPICard label="CAPITAL INVESTIDO" value={fmt(investimento)} sub="Fundo de Ativos Solar" bgColor="bg-[#FFFDF7]" borderColor="border-[#F5E3C1]" textColor="text-[#B38B4D]" trendIcon={<span className="text-[10px]">⚖️</span>}/>
+                <KPICard label="GANHO COMPROVADO" value={fmt(totalEconomizado)} sub={`${fmt(mediaMensal || 0)} / média ativa`} bgColor="bg-[#F0FDF6]" borderColor="border-[#BAF0D4]" textColor="text-[#4DB886]" trendIcon={<span className="text-[10px]">↑</span>}/>
+                <KPICard label="PAYBACK ESTIMADO" value={playbackDate} sub={`${mesesRestantes} meses restantes`} bgColor="bg-[#F2F8FC]" borderColor="border-[#D1E5F5]" textColor="text-[#5DA0D6]" trendIcon={<span className="text-[10px]">⏱️</span>}/>
+                <KPICard label="ROI ATUAL" value={fmtPercentShort(totalEconomizado/investimento)} sub={`R$ ${(investimento - totalEconomizado).toLocaleString('pt-BR')} de saldo`} bgColor="bg-[#F8FAFC]" borderColor="border-[#E2E8F0]" textColor="text-[#6B7280]" trendIcon={<span className="text-[10px]">📊</span>}/>
+            </section>
 
-                {/* ── ABA: VISÃO GERAL ─────────────────────────────────────────────── */}
-                {aba === "visao" && (
-                    <>
-                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 32 }}>
-                            <Card label="Investimento Total" value={fmt(investimento)} color="#00A36C" />
-                            <Card label="Total Economizado" value={fmt(totalEconomizado)} sub={`${historico.length} meses registrados`} color="#0077B6" />
-                            <Card label="Saldo Devedor" value={fmt(Math.max(0, saldoAtual))} sub={`${((totalEconomizado / investimento) * 100).toFixed(1)}% recuperado`} color="#F4A261" />
-                            <Card label="Breakeven Estimado" value={mesBreakeven} sub={`~${mesesRestantes} meses restantes`} color="#E63946" />
-                            <Card label="Economia Média/Mês" value={fmt(mediaEconomia)} sub="todas as unidades" color="#9B5DE5" />
-                        </div>
+            {/* ── CHARTS SECTION ───────────────────────────────────────────────── */}
+            <section className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
+                <div className="lg:col-span-2 bg-white rounded-3xl border border-slate-200 shadow-[0_8px_40px_rgba(0,0,0,0.02)] p-8 relative overflow-hidden group">
+                    <div className="absolute -right-20 -top-20 w-64 h-64 bg-[#f8fafc] rounded-full blur-3xl group-hover:bg-[#f0f9ff] transition-colors"></div>
+                    <h2 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-8 border-l-4 border-[#4DB886] pl-4">Projeção de Recuperação de Ativos</h2>
+                    <div className="absolute top-8 right-8 flex gap-8 text-[10px] font-bold text-slate-400 uppercase tracking-widest no-print">
+                        <div className="flex items-center gap-2"><span className="w-3 h-1 rounded-full bg-[#4DB886]"></span> Ganho Acumulado</div>
+                        <div className="flex items-center gap-2"><span className="w-3 h-1 rounded-full bg-[#5DA0D6]"></span> Capital em Risco</div>
+                    </div>
+                    <div className="h-[320px] mt-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={historicoMensal}>
+                                <defs>
+                                    <linearGradient id="gSave" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#4DB886" stopOpacity={0.8}/><stop offset="95%" stopColor="#4DB886" stopOpacity={0.05}/></linearGradient>
+                                    <linearGradient id="gRest" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#5DA0D6" stopOpacity={0.6}/><stop offset="95%" stopColor="#5DA0D6" stopOpacity={0}/></linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#94a3b8", fontWeight: "800" }} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={v => `R$${v}`} />
+                                <RechartsTooltip content={<CustomTooltip />} />
+                                <Area type="monotone" dataKey="acumulado" name="Economias Acumuladas" stroke="#4DB886" fill="url(#gSave)" strokeWidth={4} />
+                                <Area type="monotone" dataKey="restante" name="Capital Restante" stroke="#5DA0D6" strokeDasharray="8 8" fill="url(#gRest)" strokeWidth={2} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
 
-                        {/* BARRA DE PROGRESSO */}
-                        <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: "24px 28px", marginBottom: 28 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                                <span style={{ fontSize: 12, color: "#888", letterSpacing: 1 }}>PROGRESSO DO RETORNO</span>
-                                <span style={{ fontSize: 13, color: "#00A36C", fontWeight: 700 }}>
-                                    {((totalEconomizado / investimento) * 100).toFixed(2)}%
-                                </span>
-                            </div>
-                            <div style={{ background: "#1a1a1a", borderRadius: 8, height: 12, overflow: "hidden" }}>
-                                <div style={{
-                                    width: `${Math.min(100, (totalEconomizado / investimento) * 100)}%`,
-                                    background: "linear-gradient(90deg, #00A36C, #00D68F)",
-                                    height: "100%", borderRadius: 8, transition: "width 1s ease"
-                                }} />
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11, color: "#555" }}>
-                                <span>R$ 0</span><span>Meta: {fmt(investimento)}</span>
-                            </div>
-                        </div>
-
-                        {/* CONTRIBUIÇÃO POR UNIDADE */}
-                        <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: "24px 28px" }}>
-                            <div style={{ fontSize: 12, color: "#888", letterSpacing: 1, marginBottom: 20 }}>CONTRIBUIÇÃO POR UNIDADE CONSUMIDORA</div>
-                            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                                {Object.entries(unidadesInfo).map(([uc, info]) => {
-                                    const total = faturas.filter(f => f.uc === uc).reduce((a, f) => a + (f.credito || 0), 0);
-                                    return (
-                                        <div key={uc} style={{ flex: 1, minWidth: 200, background: "#0a0a0a", borderRadius: 12, padding: "16px 20px", borderLeft: `3px solid ${info.cor}` }}>
-                                            <div style={{ fontSize: 10, color: "#555", marginBottom: 4 }}>{uc}</div>
-                                            <div style={{ fontWeight: 700, color: "#ccc", marginBottom: 8 }}>{info.nome}</div>
-                                            <div style={{ fontSize: 22, fontWeight: 900, color: info.cor }}>{fmt(total)}</div>
-                                            <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>
-                                                {((total / (totalEconomizado || 1)) * 100).toFixed(1)}% do total economizado
-                                            </div>
-                                            <div style={{ background: "#1a1a1a", borderRadius: 4, height: 4, marginTop: 10 }}>
-                                                <div style={{ width: `${info.proporcao * 100}%`, background: info.cor, height: 4, borderRadius: 4 }} />
-                                            </div>
-                                            <div style={{ fontSize: 10, color: "#444", marginTop: 4 }}>Proporção: {(info.proporcao * 100).toFixed(0)}%</div>
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-[0_8px_40px_rgba(0,0,0,0.02)] p-8">
+                    <h2 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-10 border-l-4 border-[#B38B4D] pl-4">Mix de Contribuição</h2>
+                    <div className="space-y-10">
+                        {ucs.map(uc => {
+                            const totalUC = faturasExtradas.filter(f => f.uc === uc).reduce((a, f) => a + (f.credito || 0), 0);
+                            const perc = (totalUC / totalEconomizado) * 100 || 0;
+                            return (
+                                <div key={uc} className="group">
+                                    <div className="flex justify-between items-end mb-3">
+                                        <span className="font-black text-2xl leading-none transition-transform group-hover:scale-110" style={{ color: unidadesInfo[uc].cor }}>{perc.toFixed(0)}%</span>
+                                        <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">{unidadesInfo[uc].nome}</span>
+                                    </div>
+                                    <div className="bg-slate-50 border border-slate-100 rounded-full h-4 overflow-hidden border p-0.5">
+                                        <div className="h-full rounded-full transition-all duration-1000 shadow-[2px_0_10px_rgba(0,0,0,0.1)] relative" style={{ width: `${perc}%`, backgroundColor: unidadesInfo[uc].cor }}>
+                                            <div className="absolute inset-0 bg-gradient-to-b from-white/30 to-transparent"></div>
                                         </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    </>
-                )}
-
-                {/* ── ABA: EVOLUÇÃO ────────────────────────────────────────────────── */}
-                {aba === "evolucao" && (
-                    <>
-                        <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: "24px 28px", marginBottom: 28 }}>
-                            <div style={{ fontSize: 12, color: "#888", letterSpacing: 1, marginBottom: 4 }}>EVOLUÇÃO DO SALDO DEVEDOR</div>
-                            <div style={{ fontSize: 11, color: "#444", marginBottom: 20 }}>Histórico real + projeção futura</div>
-                            <ResponsiveContainer width="100%" height={320}>
-                                <ComposedChart data={serieSaldo} margin={{ top: 10, right: 20, left: 20, bottom: 0 }}>
-                                    <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" />
-                                    <XAxis dataKey="mes" tick={{ fill: "#555", fontSize: 11 }} />
-                                    <YAxis tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} tick={{ fill: "#555", fontSize: 11 }} />
-                                    <Tooltip content={<TooltipCustom />} />
-                                    <Legend wrapperStyle={{ color: "#666", fontSize: 12 }} />
-                                    <ReferenceLine y={0} stroke="#00A36C" strokeDasharray="4 4" label={{ value: "BREAKEVEN", fill: "#00A36C", fontSize: 10 }} />
-                                    <Area type="monotone" dataKey="investido" name="Valor Recuperado" fill="#00A36C22" stroke="#00A36C" strokeWidth={2} />
-                                    <Line type="monotone" dataKey="saldo" name="Saldo Devedor" stroke="#F4A261" strokeWidth={2.5} dot={false} />
-                                </ComposedChart>
-                            </ResponsiveContainer>
-                        </div>
-                        <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: "24px 28px" }}>
-                            <div style={{ fontSize: 12, color: "#888", letterSpacing: 1, marginBottom: 20 }}>CRÉDITO MENSAL POR UNIDADE (R$)</div>
-                            <ResponsiveContainer width="100%" height={280}>
-                                <BarChart data={[...historico, ...projecao.slice(0, 10)]} margin={{ top: 10, right: 20, left: 20, bottom: 0 }}>
-                                    <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" />
-                                    <XAxis dataKey="mes" tick={{ fill: "#555", fontSize: 11 }} />
-                                    <YAxis tickFormatter={v => `R$${v}`} tick={{ fill: "#555", fontSize: 11 }} />
-                                    <Tooltip content={<TooltipCustom />} />
-                                    <Legend wrapperStyle={{ color: "#666", fontSize: 12 }} />
-                                    {ucs.map((uc, i) => (
-                                        <Bar key={uc} dataKey={`cred_${uc}`} name={unidadesInfo[uc]?.nome || uc} stackId="a" fill={unidadesInfo[uc]?.cor || COLOR_PALETTE[i % COLOR_PALETTE.length]} radius={i === ucs.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]} />
-                                    ))}
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </>
-                )}
-
-                {/* ── ABA: FATURAS ─────────────────────────────────────────────────── */}
-                {aba === "tabela" && (
-                    <>
-                        <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: "24px 28px", marginBottom: 24 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                                <div style={{ fontSize: 12, color: "#888", letterSpacing: 1 }}>EXTRATO MENSAL — TODAS AS UNIDADES</div>
-                                <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#555" }}>
-                                    <span><span style={{ color: "#00A36C" }}>●</span> Auto</span>
-                                    <span><span style={{ color: "#F4A261" }}>●</span> Manual</span>
-                                </div>
-                            </div>
-                            <div style={{ overflowX: "auto" }}>
-                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                                    <thead>
-                                        <tr style={{ borderBottom: "1px solid #2a2a2a" }}>
-                                            <th style={{ padding: "10px 12px", textAlign: "left", color: "#555", fontWeight: 600 }}>Mês</th>
-                                            {ucs.map((uc) => (
-                                                <th key={uc} colSpan={3} style={{ padding: "10px 12px", textAlign: "center", color: unidadesInfo[uc]?.cor, fontWeight: 700, borderBottom: `2px solid ${unidadesInfo[uc]?.cor}44` }}>
-                                                    {unidadesInfo[uc]?.nome}
-                                                </th>
-                                            ))}
-                                            <th style={{ padding: "10px 12px", textAlign: "right", color: "#888" }}>Crédito Total</th>
-                                            <th style={{ padding: "10px 12px", textAlign: "right", color: "#888" }}>Saldo Dev.</th>
-                                        </tr>
-                                        <tr style={{ borderBottom: "1px solid #1a1a1a" }}>
-                                            <th style={{ padding: "10px 12px", border: 'none' }}></th>
-                                            {ucs.map(uc => (
-                                                <React.Fragment key={uc}>
-                                                    <th style={{ padding: "6px 8px", textAlign: "center", color: "#444", fontSize: 10 }}>Pago</th>
-                                                    <th style={{ padding: "6px 8px", textAlign: "center", color: "#444", fontSize: 10 }}>Crédito</th>
-                                                    <th style={{ padding: "6px 8px", textAlign: "center", color: "#444", fontSize: 10 }}>kWh</th>
-                                                </React.Fragment>
-                                            ))}
-                                            <th style={{ padding: "6px 12px", border: 'none' }}></th><th style={{ padding: "6px 12px", border: 'none' }}></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {(() => {
-                                            let saldoAcc = investimento;
-                                            return tabelaDetalhada.map((row, i) => {
-                                                saldoAcc -= row.totalCredito;
-                                                return (
-                                                    <tr key={i} style={{ borderBottom: "1px solid #161616", background: i % 2 === 0 ? "transparent" : "#0d0d0d" }}>
-                                                        <td style={{ padding: "10px 12px", color: "#aaa", fontWeight: 700 }}>{row.mes}</td>
-                                                        {ucs.map(uc => (
-                                                            <React.Fragment key={uc}>
-                                                                <td style={{ padding: "10px 8px", textAlign: "center", color: "#777" }}>
-                                                                    {row[uc] ? fmt(row[uc].pago) : "—"}
-                                                                </td>
-                                                                <td style={{ padding: "10px 8px", textAlign: "center", color: "#00A36C", fontWeight: 700 }}>
-                                                                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                                                                        {row[uc] ? fmt(row[uc].credito) : "—"}
-                                                                        {row[uc] && <FonteBadge fonte={row[uc].fonte} />}
-                                                                    </div>
-                                                                </td>
-                                                                <td style={{ padding: "10px 8px", textAlign: "center", color: "#555" }}>
-                                                                    {row[uc] ? `${row[uc].kwh} kWh` : "—"}
-                                                                </td>
-                                                            </React.Fragment>
-                                                        ))}
-                                                        <td style={{ padding: "10px 12px", textAlign: "right", color: "#00D68F", fontWeight: 900 }}>
-                                                            {fmt(row.totalCredito)}
-                                                        </td>
-                                                        <td style={{ padding: "10px 12px", textAlign: "right", color: saldoAcc <= 0 ? "#00A36C" : "#F4A261", fontWeight: 700 }}>
-                                                            {fmt(Math.max(0, saldoAcc))}
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            });
-                                        })()}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        {/* ADICIONAR FATURA MANUALMENTE */}
-                        <div style={{ background: "#111", border: "1px solid #00A36C33", borderRadius: 16, padding: "24px 28px" }}>
-                            <div style={{ fontSize: 12, color: "#00A36C", letterSpacing: 1, marginBottom: 16 }}>+ REGISTRAR NOVA FATURA MANUALMENTE</div>
-                            <div style={{ fontSize: 11, color: "#555", marginBottom: 16 }}>
-                                Faturas manuais são salvas no navegador (localStorage) como backup até o próximo ciclo de extração.
-                            </div>
-                            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-                                {[
-                                    { label: "Unidade", key: "uc", type: "select", opts: Object.entries(unidadesInfo).map(([k, v]) => ({ value: k, label: v.nome })) },
-                                    { label: "Mês (ex: Mar/2026)", key: "mes", type: "text" },
-                                    { label: "kWh Faturado", key: "kwh", type: "number" },
-                                    { label: "Valor Pago (R$)", key: "pago", type: "number" },
-                                    { label: "Valor Sem Solar (R$)", key: "semSolar", type: "number" },
-                                ].map(f => (
-                                    <div key={f.key} style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 140 }}>
-                                        <label style={{ fontSize: 10, color: "#555", letterSpacing: 1 }}>{f.label}</label>
-                                        {f.type === "select" ? (
-                                            <select value={novaFatura[f.key]} onChange={e => setNovaFatura(p => ({ ...p, [f.key]: e.target.value }))}
-                                                style={{ background: "#0a0a0a", border: "1px solid #2a2a2a", color: "#ccc", borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", fontSize: 12 }}>
-                                                {f.opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                                            </select>
-                                        ) : (
-                                            <input type={f.type} value={novaFatura[f.key]} placeholder={f.label}
-                                                onChange={e => setNovaFatura(p => ({ ...p, [f.key]: e.target.value }))}
-                                                style={{ background: "#0a0a0a", border: "1px solid #2a2a2a", color: "#ccc", borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", fontSize: 12 }} />
-                                        )}
                                     </div>
-                                ))}
-                                <button onClick={adicionarFatura} style={{
-                                    background: "#00A36C", color: "#000", border: "none", borderRadius: 8,
-                                    padding: "9px 20px", fontFamily: "inherit", fontWeight: 900, fontSize: 12, cursor: "pointer"
-                                }}>ADICIONAR</button>
-                            </div>
-                            {faturasManuals.length > 0 && (
-                                <div style={{ marginTop: 16, fontSize: 11, color: "#F4A261" }}>
-                                    ⚠️ {faturasManuals.length} fatura(s) manual(is) pendente(s) no localStorage.
-                                    <button onClick={() => { setFaturasManuals([]); localStorage.removeItem(LS_KEY); }} style={{
-                                        marginLeft: 12, background: "transparent", color: "#E63946", border: "1px solid #E6394644", borderRadius: 6, padding: "3px 10px", fontFamily: "inherit", fontSize: 10, cursor: "pointer"
-                                    }}>Limpar manuais</button>
                                 </div>
-                            )}
-                        </div>
-                    </>
-                )}
+                            );
+                        })}
+                    </div>
+                </div>
+            </section>
 
-                {/* ── ABA: CONFIGURAR ──────────────────────────────────────────────── */}
-                {aba === "config" && (
-                    <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: "32px 36px", maxWidth: 640 }}>
-                        <div style={{ fontSize: 12, color: "#888", letterSpacing: 1, marginBottom: 28 }}>PARÂMETROS DO INVESTIMENTO</div>
-                        {[
-                            { label: "Investimento Total (R$)", val: investimento, set: setInvestimento, min: 1000, max: 200000, step: 100 },
-                            { label: "Reajuste Tarifário Anual (%)", val: reajuste, set: setReajuste, min: 0, max: 20, step: 0.5 },
-                        ].map(({ label, val, set, min, max, step }) => (
-                            <div key={label} style={{ marginBottom: 28 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                                    <span style={{ fontSize: 12, color: "#777" }}>{label}</span>
-                                    <span style={{ fontSize: 14, fontWeight: 900, color: "#00A36C" }}>{label.includes("R$") ? fmt(val) : `${val}%`}</span>
-                                </div>
-                                <input type="range" min={min} max={max} step={step} value={val} onChange={e => set(+e.target.value)}
-                                    style={{ width: "100%", accentColor: "#00A36C" }} />
-                            </div>
-                        ))}
-                        <div style={{ marginTop: 8, paddingTop: 24, borderTop: "1px solid #1a1a1a" }}>
-                            <div style={{ fontSize: 12, color: "#888", letterSpacing: 1, marginBottom: 20 }}>PROPORÇÃO POR UNIDADE</div>
-                            {ucs.map((uc) => (
-                                <div key={uc} style={{ marginBottom: 20 }}>
-                                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                                        <span style={{ fontSize: 11, color: "#666" }}>{unidadesInfo[uc]?.nome} ({uc})</span>
-                                        <span style={{ fontSize: 14, fontWeight: 900, color: unidadesInfo[uc]?.cor }}>{proporcoes[uc]?.toFixed(0)}%</span>
-                                    </div>
-                                    <input type="range" min={0} max={100} step={1} value={proporcoes[uc] || 0} onChange={e => setProporcoes(p => ({ ...p, [uc]: +e.target.value }))}
-                                        style={{ width: "100%", accentColor: unidadesInfo[uc]?.cor }} />
-                                </div>
-                            ))}
-                            <div style={{ fontSize: 11, color: ucs.reduce((a, uc) => a + (proporcoes[uc] || 0), 0) !== 100 ? "#E63946" : "#00A36C", marginTop: 8 }}>
-                                {ucs.reduce((a, uc) => a + (proporcoes[uc] || 0), 0) !== 100
-                                    ? `⚠️ Total = ${ucs.reduce((a, uc) => a + (proporcoes[uc] || 0), 0)}% (deve ser 100%)`
-                                    : `✓ Total = 100%`}
-                            </div>
-                        </div>
+            {/* ── Performance TABLE ─────────────────────────────────────────── */}
+            <section className="bg-white rounded-3xl border border-slate-200 shadow-[0_12px_50px_rgba(0,0,0,0.03)] overflow-hidden">
+                <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/20">
+                    <div>
+                        <h2 className="text-sm font-black text-slate-800 uppercase tracking-[2px] border-l-4 border-slate-800 pl-4 mb-1">Extrato Mensal Consolidado</h2>
+                        <p className="text-[11px] text-slate-400 font-bold uppercase ml-5">Detalhamento dos Rendimentos por Ativo</p>
+                    </div>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-[13px] text-slate-600">
+                        <thead>
+                            <tr className="text-[10px] text-slate-400 font-black uppercase bg-slate-50 border-b border-slate-100 tracking-[1.5px]">
+                                <th className="px-8 py-5">Período</th>
+                                <th className="px-8 py-5 text-right">Valor Pago (Taxas)</th>
+                                <th className="px-8 py-5 text-right">Valor Recuperado</th>
+                                <th className="px-8 py-5 text-right">% Investimento</th>
+                                <th className="px-8 py-5 text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                            {[...new Set(faturasExtradas.map(f => f.mes))].sort((a,b) => {
+                                const [mA, yA] = a.split('/').map(Number);
+                                const [mB, yB] = b.split('/').map(Number);
+                                return (yB * 100 + mB) - (yA * 100 + mA);
+                            }).map(mes => {
+                                const faturasMes = faturasExtradas.filter(f => f.mes === mes);
+                                const totalMes = faturasMes.reduce((a,f) => a + (f.credito || 0), 0);
+                                const pagoMes = faturasMes.reduce((a,f) => a + (f.pago || 0), 0);
+                                const percMes = (totalMes / investimento) * 100;
+                                const isOpen = expandidoId === mes;
 
-                        {/* CENÁRIOS */}
-                        <div style={{ marginTop: 32, background: "#0a0a0a", borderRadius: 12, padding: "20px 24px", border: "1px solid #1a1a1a" }}>
-                            <div style={{ fontSize: 11, color: "#555", marginBottom: 12, letterSpacing: 1 }}>CENÁRIOS DE BREAKEVEN</div>
-                            {[
-                                { cenario: "Pessimista (-15%)", mult: 0.85, cor: "#E63946" },
-                                { cenario: "Realista", mult: 1.0, cor: "#F4A261" },
-                                { cenario: "Otimista (+15%)", mult: 1.15, cor: "#00A36C" },
-                            ].map(({ cenario, mult, cor }) => {
-                                const meses = mediaEconomia > 0 ? Math.ceil(saldoAtual / (mediaEconomia * mult)) : "—";
                                 return (
-                                    <div key={cenario} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #141414" }}>
-                                        <span style={{ fontSize: 12, color: "#666" }}>{cenario}</span>
-                                        <span style={{ fontSize: 13, fontWeight: 700, color: cor }}>{typeof meses === "number" ? `~${meses} meses` : "—"}</span>
-                                    </div>
+                                    <React.Fragment key={mes}>
+                                        <tr className={`hover:bg-[#F8FBFE] transition-colors cursor-pointer group ${isOpen ? 'bg-[#F2F8FC]/60' : ''}`} onClick={() => setExpandidoId(isOpen ? null : mes)}>
+                                            <td className="px-8 py-6 font-black text-slate-800 flex items-center gap-4">
+                                                <div className={`w-6 h-6 rounded-lg flex items-center justify-center border border-slate-200 text-slate-400 transition-all ${isOpen ? 'rotate-180 bg-slate-800 border-slate-800 text-white shadow-md' : 'bg-white group-hover:border-slate-800 group-hover:text-slate-800'}`}>
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                                                </div>
+                                                {mes}
+                                            </td>
+                                            <td className="px-8 py-6 text-right font-medium text-slate-400">{fmt(pagoMes)}</td>
+                                            <td className="px-8 py-6 text-right font-black text-slate-800">{fmt(totalMes)}</td>
+                                            <td className="px-8 py-6 text-right">
+                                                <span className="font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full text-[11px] tabular-nums">{fmtPercentLong(totalMes / investimento)}</span>
+                                            </td>
+                                            <td className="px-8 py-6 flex justify-center">
+                                                <span className="flex items-center gap-2 text-[#4DB886] font-black text-[10px] bg-[#EEFDF5] px-4 py-2 rounded-full border border-[#D1F7E1] shadow-sm">
+                                                    CONCILIADO
+                                                    <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"></path></svg>
+                                                </span>
+                                            </td>
+                                        </tr>
+                                        {isOpen && (
+                                            <tr className="bg-white">
+                                                <td colSpan="5" className="p-0 border-b border-slate-100">
+                                                    <div className="p-10 pl-24 grid grid-cols-1 md:grid-cols-2 gap-12 bg-slate-50/50 relative">
+                                                        <div className="absolute top-0 left-0 bottom-0 w-2.5 bg-[#4DB886] rounded-r-full shadow-[2px_0_10px_rgba(77,184,134,0.3)]"></div>
+                                                        <div>
+                                                            <div className="mb-8">
+                                                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[2.5px] mb-1">Composição por Ativo</h4>
+                                                                <p className="text-[11px] text-slate-300 font-bold uppercase italic">Detalhamento individual das unidades</p>
+                                                            </div>
+                                                            <div className="space-y-4">
+                                                                {ucs.sort().map(uc => {
+                                                                    const f = faturasMes.find(x => x.uc === uc);
+                                                                    if (!f) return null;
+                                                                    return (
+                                                                        <div key={uc} className="flex justify-between items-center bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_4px_15px_rgba(0,0,0,0.015)] hover:scale-[1.02] transition-all hover:bg-slate-50/50">
+                                                                            <div className="flex items-center gap-4">
+                                                                                <div className="w-4 h-4 rounded-md shadow-sm" style={{ background: unidadesInfo[uc].cor }}></div>
+                                                                                <div className="flex flex-col">
+                                                                                    <span className="font-black text-slate-800 text-[12px]">{unidadesInfo[uc].nome}</span>
+                                                                                    {f.missing ? (
+                                                                                        <span className="text-[10px] text-slate-300 font-bold uppercase">Sem Fatura</span>
+                                                                                    ) : (
+                                                                                        <span className="text-[10px] text-slate-400 font-bold">{f.kwh} kWh</span>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="flex flex-col items-end">
+                                                                                <span className="font-black text-slate-900">{f.missing ? '---' : fmt(f.credito)}</span>
+                                                                                <span className="text-[10px] font-bold text-[#b38b4d]">
+                                                                                    Contrib: {f.missing || totalMes === 0 ? '0%' : ((f.credito / totalMes)*100).toFixed(0) + '%'}
+                                                                                </span>
+                                                                                <span className="text-[10px] font-bold text-slate-400 mt-0.5">
+                                                                                    ROI U.C: {f.missing ? '---' : fmtPercentLong(f.credito / investimento)}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-white rounded-3xl p-10 border border-slate-100 shadow-sm flex flex-col justify-center">
+                                                            <div className="mb-8 text-center">
+                                                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[2.5px] mb-1">Participação na Geração</h4>
+                                                                <div className="w-10 h-1 bg-slate-100 mx-auto rounded-full"></div>
+                                                            </div>
+                                                            <div className="w-full h-48">
+                                                                <ResponsiveContainer width="100%" height="100%">
+                                                                    <BarChart data={faturasMes}>
+                                                                        <XAxis dataKey="uc" hide />
+                                                                        <YAxis hide />
+                                                                        <Bar dataKey="credito" radius={[8, 8, 0, 0]}>
+                                                                            {faturasMes.map((entry, index) => <Cell key={index} fill={unidadesInfo[entry.uc].cor} />)}
+                                                                        </Bar>
+                                                                    </BarChart>
+                                                                </ResponsiveContainer>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </React.Fragment>
                                 );
                             })}
-                        </div>
-                    </div>
-                )}
-            </div>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
 
-            {/* ── ESTILOS PARA IMPRESSÃO ────────────────────────────────────────── */}
-            <style>{`
-        @media print {
-          body { background: white !important; color: black !important; }
-          button { display: none !important; }
-          div[style*="background: #0a0a0a"] { background: white !important; }
-          div[style*="background: #111"] { background: #f5f5f5 !important; border-color: #ddd !important; }
-          input[type="range"] { display: none; }
-          * { color: black !important; }
-          td, th { border: 1px solid #ddd !important; }
-        }
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
-      `}</style>
         </div>
     );
 }

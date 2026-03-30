@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 # Sincronização automática
 
-def sync(profile="BIMBATO", cleanup=True):
+def sync(profile="PADRAO", cleanup=False):
     profile_path = Path(f"profiles/{profile}")
     json_path = profile_path / "dados_faturas.json"
     
