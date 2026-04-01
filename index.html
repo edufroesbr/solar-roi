@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Solar Analytics Premium — Management Report</title>
+    <title>ROI SOLAR PREMIUM v0.3 — Inteligência de Dados</title>
 
     <!-- Premium Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,9 +19,26 @@
     <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
     <script crossorigin src="https://unpkg.com/recharts@2.10.3/umd/Recharts.js"></script>
     <script crossorigin src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 
     <style>
         :root {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-glass: rgba(255, 255, 255, 0.8);
+            --text-main: #1e293b;
+            --text-sub: #64748b;
+            --border: rgba(226, 232, 240, 1);
+            --primary: #10b981;
+            --primary-glow: rgba(16, 185, 129, 0.1);
+            --secondary: #0ea5e9;
+            --accent: #f59e0b;
+            --danger: #ef4444;
+            --header-grad: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            --card-shadow: 0 4px 20px rgba(0,0,0,0.04);
+        }
+
+        .dark-mode {
             --bg: #030712;
             --surface: #0f172a;
             --surface-glass: rgba(15, 23, 42, 0.75);
@@ -34,16 +51,7 @@
             --accent: #f59e0b;
             --danger: #ef4444;
             --header-grad: linear-gradient(135deg, #064e3b 0%, #022c22 100%);
-        }
-
-        .light-mode {
-            --bg: #f8fafc;
-            --surface: #ffffff;
-            --surface-glass: rgba(255, 255, 255, 0.7);
-            --text-main: #0f172a;
-            --text-sub: #64748b;
-            --border: rgba(226, 232, 240, 1);
-            --header-grad: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            --card-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
         }
 
         body,
@@ -239,6 +247,7 @@
             body {
                 background: white !important;
                 color: black !important;
+                font-size: 10px;
             }
 
             .no-print {
@@ -247,73 +256,67 @@
 
             .glass {
                 background: white !important;
-                border: 1px solid #ddd !important;
+                border: 1px solid #eee !important;
                 box-shadow: none !important;
-                -webkit-backdrop-filter: none !important;
                 backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
                 color: black !important;
+                padding: 12px !important;
+                border-radius: 8px !important;
             }
 
             .container {
                 max-width: 100% !important;
                 padding: 0 !important;
+                margin: 0 !important;
             }
 
             header {
                 background: #10b981 !important;
                 color: white !important;
-                padding: 20px !important;
-                margin-bottom: 40px !important;
-                display: flex !important;
-                flex-direction: column !important;
-                align-items: flex-start !important;
-            }
-
-            .print-header-info {
-                display: block !important;
-                margin-top: 10px;
-                font-size: 14px;
-                font-weight: 700;
-                background: rgba(0, 0, 0, 0.1);
-                padding: 8px 16px;
-                border-radius: 8px;
-            }
-
-            h1,
-            h3 {
-                color: black !important;
+                padding: 15px !important;
+                margin-bottom: 20px !important;
             }
 
             header h1 {
                 color: white !important;
+                font-size: 18px !important;
             }
 
             .grid-main {
-                gap: 10px !important;
+                display: block !important;
                 margin-top: 0 !important;
             }
 
-            .col-4,
-            .col-6,
-            .col-8,
-            .col-12 {
-                grid-column: span 12 !important;
+            .col-3, .col-4, .col-6, .col-8, .col-12 {
+                width: 100% !important;
+                margin-bottom: 15px !important;
                 page-break-inside: avoid;
             }
 
-            td {
-                background: white !important;
-                border: 1px solid #eee !important;
-                color: black !important;
+            table {
+                font-size: 9px !important;
+                width: 100% !important;
+                table-layout: fixed;
             }
+
+            th, td {
+                padding: 8px 4px !important;
+                word-wrap: break-word;
+            }
+
+            th:nth-child(1), td:nth-child(1) { width: 30px; }
+            th:nth-child(2), td:nth-child(2) { width: 70px; }
+            th:nth-child(3), td:nth-child(3) { width: 80px; }
+            th:nth-child(4), td:nth-child(4) { width: 90px; }
+            th:nth-child(5), td:nth-child(5) { width: 90px; }
+            th:nth-child(6), td:nth-child(6) { width: 90px; }
+            th:nth-child(7), td:nth-child(7) { width: 120px; }
 
             .section-header {
-                border-left: 4px solid #10b981 !important;
-                color: #555 !important;
-            }
-
-            .metric-sub {
-                color: #666 !important;
+                border-left: 3px solid #10b981 !important;
+                margin-bottom: 10px !important;
+                padding-left: 8px !important;
             }
         }
 
@@ -336,15 +339,36 @@
         const { useState, useMemo, useEffect, useRef } = React;
         const {
             AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-            Tooltip, Legend, ResponsiveContainer, ComposedChart, Line
+            Tooltip, Legend, ResponsiveContainer, ComposedChart, Line, Cell
         } = Recharts;
 
         const COLOR_PALETTE = ["#10b981", "#0ea5e9", "#f59e0b", "#6366f1", "#ec4899", "#8b5cf6"];
 
-        const fmt = v => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v || 0);
+        const fmt = v => new Intl.NumberFormat("pt-BR", { 
+            style: "currency", 
+            currency: "BRL",
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2 
+        }).format(v || 0);
+
+        const CustomTooltip = ({ active, payload, label }) => {
+            if (!active || !payload?.length) return null;
+            return (
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '12px 16px', boxShadow: 'var(--card-shadow)', fontSize: '13px' }}>
+                    <div style={{ fontWeight: 800, marginBottom: 8, borderBottom: '1px solid var(--border)', pb: 4, color: 'var(--text-main)' }}>{label}</div>
+                    {payload.map((p, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 20, mb: 4 }}>
+                            <span style={{ color: 'var(--text-sub)', fontWeight: 600 }}>{p.name}:</span>
+                            <span style={{ fontWeight: 900, color: p.color }}>{fmt(p.value)}</span>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
 
         function App() {
-            const [isDark, setIsDark] = useState(true);
+            const [isDark, setIsDark] = useState(false); // Mantém Light Mode por padrão conforme solicitado
+
             const [dadosJson, setDadosJson] = useState(null);
             const [filtroUnidade, setFiltroUnidade] = useState("todas");
             const [showExport, setShowExport] = useState(false);
@@ -357,9 +381,17 @@
             const unidadesInfo = useMemo(() => {
                 if (!dadosJson || !dadosJson.unidades) return {};
                 const info = {};
+                
+                // Mapeamento de apelidos conforme solicitado pelo usuário
+                const apelidos = {
+                    "03178785-1": "Ana Maria",
+                    "03202027-9": "Mariana e André",
+                    "03212774-X": "Mariana e Eduardo"
+                };
+
                 Object.keys(dadosJson.unidades).forEach((uc, index) => {
                     info[uc] = {
-                        nome: dadosJson.unidades[uc].responsavel || uc,
+                        nome: apelidos[uc] ? `${uc} → ${apelidos[uc]}` : (dadosJson.unidades[uc].responsavel || uc),
                         cor: COLOR_PALETTE[index % COLOR_PALETTE.length],
                         quota: dadosJson.unidades[uc].proporcao || 0
                     };
@@ -377,8 +409,8 @@
                 return () => document.removeEventListener("mousedown", handleClickOutside);
             }, []);
 
-            const [perfis, setPerfis] = useState([{ id: 'BIMBATO', nome: 'Bimbato' }]);
-            const [currentProfile, setCurrentProfile] = useState('BIMBATO');
+            const [perfis, setPerfis] = useState([{ id: '53937007172', nome: '53937007172' }]);
+            const [currentProfile, setCurrentProfile] = useState('53937007172');
 
             useEffect(() => {
                 fetch(`profiles/perfis.json?v=${Date.now()}`)
@@ -410,7 +442,7 @@
 
             const toggleTheme = () => {
                 setIsDark(!isDark);
-                document.body.classList.toggle("light-mode");
+                document.body.classList.toggle("dark-mode");
             };
 
             const exportCSV = () => {
@@ -445,18 +477,28 @@
                         const kwh = parseFloat(f.kwh_faturado || 0);
                         const pago = parseFloat(f.valor_pago || 0);
                         let recuperado = parseFloat(f.credito_reais || 0);
-
-                        // Fallback de segurança: se temos kWh de crédito mas o valor em R$ está zerado
-                        if (recuperado === 0 && (f.credito_kwh > 0)) {
-                            recuperado = f.credito_kwh * 0.95;
+                        
+                        // Fallback de segurança: se o valor em R$ está zerado mas temos kWh
+                        if ((!recuperado || recuperado === 0) && (f.credito_kwh > 0)) {
+                            recuperado = f.credito_kwh * (f.tarifa || 0.95);
                         }
+
+                        
+                        // Se for um mês de geração mas sem compensação ainda (ex: 10/2025)
+                        // Marcamos como pendente ou apenas garantimos visibilidade
+                        const injetado = parseFloat(f.injetado_kwh || 0);
+
 
                         list.push({
                             ...f,
                             uc,
                             kwh_faturado: kwh,
                             valor_pago: pago,
-                            credito_reais: recuperado
+                            credito_reais: recuperado,
+                            injetado: f.injetado_kwh,
+                            compensado: f.credito_kwh,
+                            saldoAnterior: f.saldo_anterior_kwh,
+                            saldoAtual: f.saldo_credito
                         });
                     });
                 });
@@ -464,9 +506,9 @@
             }, [dadosJson]);
 
             const stats = useMemo(() => {
-                if (!dadosJson) return null;
+                if (!dadosJson) return { investimento: 0, totalRecuperado: 0, totalConsumo: 0, mediaMensal: 0 };
                 const filteredAll = allFaturas.filter(f => filtroUnidade === "todas" || f.uc === filtroUnidade);
-                const investimento = parseFloat(dadosJson.investimento_total || 0);
+                const investimento = parseFloat(dadosJson.investimento_total || 22900);
                 const totalRecuperado = filteredAll.reduce((acc, f) => acc + (f.credito_reais || 0), 0);
                 const totalConsumo = filteredAll.reduce((acc, f) => acc + (f.kwh_faturado || 0), 0);
                 const mesesCount = [...new Set(filteredAll.map(f => f.mes))].length;
@@ -475,6 +517,7 @@
             }, [allFaturas, filtroUnidade, dadosJson]);
 
             const resumoMensal = useMemo(() => {
+                if (!dadosJson || !dadosJson.unidades) return [];
                 const map = {};
                 const filteredAll = allFaturas.filter(f => filtroUnidade === "todas" || f.uc === filtroUnidade);
 
@@ -494,15 +537,31 @@
                         pago: f.valor_pago,
                         bruto: f.valor_sem_solar,
                         recuperado: unitRecovery,
-                        fonte: f.fonte
+                        fonte: f.fonte,
+                        injetado: f.injetado,
+                        compensado: f.credito_kwh,
+                        saldoAnterior: f.saldoAnterior,
+                        saldoAtual: f.saldoAtual,
+                        injetado: f.injetado // Adicionado para garantir visibilidade da geração
                     });
                 });
 
-                return Object.values(map).sort((a, b) => b.referencia.localeCompare(a.referencia));
-            }, [allFaturas, filtroUnidade, unidadesInfo]);
+                // Adiciona lógica de Capital em Risco (Restante) ao resumo
+                let capitalAcumulado = 0;
+                const investimentoTotal = parseFloat(dadosJson.investimento_total || 22900);
+                
+                const sorted = Object.values(map).sort((a, b) => a.referencia.localeCompare(b.referencia));
+                sorted.forEach(m => {
+                    capitalAcumulado += m.recuperado;
+                    m.restante = Math.max(0, investimentoTotal - capitalAcumulado);
+                });
+
+                return sorted.reverse();
+
+            }, [allFaturas, filtroUnidade, unidadesInfo, dadosJson]);
 
             const projecao = useMemo(() => {
-                if (!stats || allFaturas.length === 0) return null;
+                if (!stats || !dadosJson || allFaturas.length === 0) return null;
 
                 const contribuicaoPorUnidade = {};
                 const mesesRef = [...new Set(allFaturas.map(f => f.referencia))];
@@ -517,25 +576,25 @@
                 });
 
                 const totalEstimado = Object.values(contribuicaoPorUnidade).reduce((a, b) => a + b, 0);
-                const saldoPendente = Math.max(0, stats.investimento - totalEstimado);
+                const saldoPendente = Math.max(0, (stats.investimento || 22900) - totalEstimado);
 
                 const mediaMensalReal = totalEstimado / mesesCount;
                 const mesesRestantes = mediaMensalReal > 0 ? Math.ceil(saldoPendente / mediaMensalReal) : 0;
 
                 return { mesesRestantes, contribuicaoPorUnidade, totalEstimado, mediaMensalEstimada: mediaMensalReal };
-            }, [stats, allFaturas]);
+            }, [stats, allFaturas, dadosJson, unidadesInfo]);
 
             if (loading) return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', color: '#fff' }}>☀️ PREPARANDO INTELIGÊNCIA...</div>;
 
             return (
                 <div>
-                    <header style={{ background: "var(--header-grad)", padding: "40px 0 60px", marginBottom: "32px" }}>
+                    <header style={{ background: "var(--header-grad)", padding: "24px 0 24px", borderBottom: '1px solid var(--border)', marginBottom: "32px", position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(10px)' }}>
                         <div className="container" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-                                <div style={{ fontSize: 40, border: '2px solid rgba(255,255,255,0.4)', borderRadius: 12, padding: 8 }}>☀️</div>
+                                <div style={{ fontSize: 28, background: 'var(--text-main)', color: 'var(--bg)', borderRadius: 12, width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>☀️</div>
                                 <div>
-                                    <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, color: "#fff", letterSpacing: -0.5 }}>Solar Analytics Premium</h1>
-                                    <p style={{ margin: "4px 0 0", fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: 700, letterSpacing: 1.5 }}>GESTÃO ESTRATÉGICA E ROI DINÂMICO</p>
+                                    <h1 style={{ margin: 0, fontSize: 22, fontWeight: 900, color: "var(--text-main)", letterSpacing: -0.5 }}>ROI SOLAR <span style={{ color: 'var(--accent)', fontStyle: 'italic' }}>PREMIUM</span></h1>
+                                    <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-sub)", fontWeight: 800, letterSpacing: 1.5 }}>INTELLIGENCE ENGINE • MODO INTELIGENTE</p>
                                     <div className="print-header-info print-only">
                                         {filtroUnidade === "todas" ? "Relatório: VISÃO GLOBAL DA USINA" : `Relatório: ${unidadesInfo[filtroUnidade]?.nome} (UC ${filtroUnidade})`}
                                     </div>
@@ -579,7 +638,7 @@
                                     </select>
                                 </div>
 
-                                <button className="theme-toggle" style={{ marginTop: 12 }} onClick={toggleTheme}>{isDark ? "🌙" : "☀️"}</button>
+                                <button className="theme-toggle" style={{ marginTop: 12, background: 'var(--border)', border: 'none', borderRadius: '50%', width: 32, height: 32, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={toggleTheme}>{isDark ? "☀️" : "🌙"}</button>
                             </div>
                         </div>
                     </header>
@@ -650,15 +709,27 @@
                             )}
 
                             <div className="col-12 glass">
-                                <div className="section-header">Histórico de Performance Financeira</div>
+                                <div className="section-header">Histórico de Performance Financeira Acumulada</div>
                                 <div style={{ height: 350, marginTop: 24 }}>
                                     <ResponsiveContainer width="100%" height="100%">
                                         <AreaChart data={resumoMensal.slice().reverse()}>
+                                            <defs>
+                                                <linearGradient id="gSave" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3}/>
+                                                    <stop offset="95%" stopColor="var(--primary)" stopOpacity={0}/>
+                                                </linearGradient>
+                                                <linearGradient id="gRest" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="var(--secondary)" stopOpacity={0.2}/>
+                                                    <stop offset="95%" stopColor="var(--secondary)" stopOpacity={0}/>
+                                                </linearGradient>
+                                            </defs>
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-                                            <XAxis dataKey="mes" tick={{ fontSize: 11, fill: 'var(--text-sub)' }} />
-                                            <YAxis tick={{ fontSize: 11, fill: 'var(--text-sub)' }} />
-                                            <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16 }} />
-                                            <Area type="monotone" dataKey="recuperado" stroke="var(--primary)" strokeWidth={4} fill="var(--primary-glow)" />
+                                            <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'var(--text-sub)', fontWeight: 700 }} />
+                                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'var(--text-sub)' }} tickFormatter={v => `R$ ${v.toLocaleString('pt-BR')}`} />
+                                            <Tooltip content={<CustomTooltip />} />
+                                            <Legend verticalAlign="top" height={36}/>
+                                            <Area type="monotone" dataKey="recuperado" name="Economia Mensal (R$)" stroke="var(--primary)" strokeWidth={4} fill="url(#gSave)" />
+                                            <Area type="monotone" dataKey="restante" name="Capital em Risco (R$)" stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 5" fill="none" />
                                         </AreaChart>
                                     </ResponsiveContainer>
                                 </div>
@@ -698,7 +769,8 @@
                                                                 <div style={{ flex: 1, background: 'var(--border)', height: 6, borderRadius: 10 }}>
                                                                     <div style={{ width: `${Math.min(100, (m.recuperado / (stats.investimento / 72)) * 100)}%`, background: 'var(--primary)', height: '100%', borderRadius: 10 }} />
                                                                 </div>
-                                                                <span style={{ fontSize: 11, fontWeight: 900 }}>{((m.recuperado / stats.investimento) * 100).toFixed(2)}% do Investimento Total</span>
+                                                                <span style={{ fontSize: 11, fontWeight: 900 }}>{((m.recuperado / stats.investimento) * 100).toFixed(2)}% da usina</span>
+
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -715,14 +787,26 @@
                                                                             <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-sub)', marginBottom: 8, opacity: 0.6 }}>
                                                                                 FONTE: {det.fonte?.toUpperCase() || "SEED"}
                                                                             </div>
-                                                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                                                                                <div>
-                                                                                    <span className="metric-title">CONSUMO</span>
-                                                                                    <span className="mono" style={{ fontSize: 11 }}>{det.kwh} kWh</span>
+                                                                            <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 gap-4">
+                                                                                <div className="flex flex-col gap-1">
+                                                                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Energia (kWh)</span>
+                                                                                    <span className="text-[11px] text-slate-600 font-medium">Injetada: <b className="text-slate-800">{det.injetado || 0}</b></span>
+                                                                                    <span className="text-[11px] text-[#00A36C] font-medium">Compensada: <b className="font-bold">{det.compensado || 0}</b></span>
                                                                                 </div>
-                                                                                <div>
-                                                                                    <span className="metric-title">VALOR PAGO</span>
-                                                                                    <span className="mono" style={{ fontSize: 11 }}>{fmt(det.pago)}</span>
+                                                                                <div className="flex flex-col gap-1 items-end text-right">
+                                                                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Saldos (kWh)</span>
+                                                                                    <span className="text-[11px] text-slate-500">Anterior: {det.saldoAnterior !== null ? det.saldoAnterior : '---'}</span>
+                                                                                    <span className="text-[11px] text-slate-600 font-bold">Atual: {det.saldoAtual !== null ? det.saldoAtual : '---'}</span>
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="mt-4 flex justify-between items-center bg-slate-50/50 p-3 rounded-xl border border-slate-100">
+                                                                                <div className="flex flex-col">
+                                                                                    <span className="text-[9px] font-black text-slate-400 uppercase">Valor Pago (Neoenergia)</span>
+                                                                                    <span className="text-sm font-bold text-slate-600">{fmt(det.pago)}</span>
+                                                                                </div>
+                                                                                <div className="flex flex-col items-end">
+                                                                                    <span className="text-[9px] font-black text-[#00A36C] uppercase">Valor Compensado</span>
+                                                                                    <span className="text-sm font-black text-[#00A36C]">{fmt(det.recuperado)}</span>
                                                                                 </div>
                                                                             </div>
                                                                         </div>

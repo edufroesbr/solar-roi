@@ -29,10 +29,10 @@ REGEX_VALOR_TOTAL = re.compile(
     re.IGNORECASE,
 )
 
-# REGEX DO RODAPÉ (Ouro do dado: o que foi REALMENTE descontado da conta)
-# Ex: "COMPENSADO....: 500"
-REGEX_COMPENSADO_PONTOS = re.compile(r"COMPENSADO\.+:?\s*([\d]+)", re.IGNORECASE)
-REGEX_INJETADO_PONTOS = re.compile(r"INJETADO\.+:?\s*([\d]+)", re.IGNORECASE)
+REGEX_COMPENSADO_PONTOS = re.compile(r"COMPENSADO[\s.]*:?\s*([\d]+)", re.IGNORECASE)
+REGEX_INJETADO_PONTOS = re.compile(r"INJETADO[\s.]*:?\s*([\d]+)", re.IGNORECASE)
+REGEX_SALDO_ANTERIOR_PONTOS = re.compile(r"SALDO\s+ANTERIOR[\s.]*:?\s*(\d{1,5})", re.IGNORECASE)
+REGEX_TRANSF_PONTOS = re.compile(r"TRANSF\(CRED-DEB\)[\s.]*:?\s*([\d]+)", re.IGNORECASE)
 
 # Crédito kWh no corpo da fatura (itens de GD)
 REGEX_CREDITO_GD_KWH = re.compile(
@@ -143,6 +143,18 @@ def _parsear_via_regex(texto: str) -> dict:
         resultado["credito_kwh"] = int(m_foot.group(1))
         logger.debug("Crédito kWh (Footer): %s", resultado["credito_kwh"])
 
+    m_injetado = REGEX_INJETADO_PONTOS.search(texto)
+    if m_injetado:
+        resultado["injetado_kwh"] = int(m_injetado.group(1))
+
+    m_anterior = REGEX_SALDO_ANTERIOR_PONTOS.search(texto)
+    if m_anterior:
+        resultado["saldo_anterior_kwh"] = int(m_anterior.group(1))
+
+    m_transf = REGEX_TRANSF_PONTOS.search(texto)
+    if m_transf:
+        resultado["transf_kwh"] = int(m_transf.group(1))
+
     # PRIORIDADE 2: Itens de GD (Corpo) - use apenas se não achou no rodapé
     if not resultado.get("credito_kwh"):
         m = REGEX_CREDITO_GD_KWH.search(texto)
@@ -199,7 +211,11 @@ def parsear_fatura(caminho_pdf: str) -> dict:
         dados["valor_sem_solar"] = round(dados["credito_kwh"] * dados["tarifa"], 2)
 
     # Garante campos nulos se não encontrados
-    for c in ["valor_pago", "credito_kwh", "credito_reais", "valor_sem_solar", "saldo_credito", "kwh_faturado"]:
+    campos_esperados = [
+        "valor_pago", "credito_kwh", "credito_reais", "valor_sem_solar", 
+        "saldo_credito", "kwh_faturado", "injetado_kwh", "saldo_anterior_kwh", "transf_kwh"
+    ]
+    for c in campos_esperados:
         dados.setdefault(c, None)
     
     logger.info("✅ %s: %s", p.name, dados)

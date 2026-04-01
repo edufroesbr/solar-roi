@@ -110,7 +110,13 @@ export default function App() {
                             pago: f.valor_pago || 0,
                             semSolar: f.valor_sem_solar || 0,
                             credito: f.credito_reais > 0 ? f.credito_reais : (f.valor_sem_solar > f.valor_pago ? f.valor_sem_solar - f.valor_pago : 0),
-                            responsavel: info.responsavel || uc
+                            responsavel: info.responsavel || uc,
+                            // Novos campos
+                            injetado: f.injetado_kwh,
+                            compensado: f.credito_kwh,
+                            saldoAnterior: f.saldo_anterior_kwh,
+                            saldoAtual: f.saldo_credito,
+                            transf: f.transf_kwh
                         });
                     });
 
@@ -372,27 +378,39 @@ export default function App() {
                                                                     const f = faturasMes.find(x => x.uc === uc);
                                                                     if (!f) return null;
                                                                     return (
-                                                                        <div key={uc} className="flex justify-between items-center bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_4px_15px_rgba(0,0,0,0.015)] hover:scale-[1.02] transition-all hover:bg-slate-50/50">
-                                                                            <div className="flex items-center gap-4">
+                                                                        <div key={uc} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_4px_15px_rgba(0,0,0,0.015)] hover:scale-[1.01] transition-all mb-3">
+                                                                            <div className="flex items-center gap-4 mb-3">
                                                                                 <div className="w-4 h-4 rounded-md shadow-sm" style={{ background: unidadesInfo[uc].cor }}></div>
                                                                                 <div className="flex flex-col">
                                                                                     <span className="font-black text-slate-800 text-[12px]">{unidadesInfo[uc].nome}</span>
-                                                                                    {f.missing ? (
-                                                                                        <span className="text-[10px] text-slate-300 font-bold uppercase">Sem Fatura</span>
-                                                                                    ) : (
-                                                                                        <span className="text-[10px] text-slate-400 font-bold">{f.kwh} kWh</span>
-                                                                                    )}
+                                                                                    {f.missing && <span className="text-[10px] text-slate-300 font-bold uppercase">Sem Fatura</span>}
                                                                                 </div>
                                                                             </div>
-                                                                            <div className="flex flex-col items-end">
-                                                                                <span className="font-black text-slate-900">{f.missing ? '---' : fmt(f.credito)}</span>
-                                                                                <span className="text-[10px] font-bold text-[#b38b4d]">
-                                                                                    Contrib: {f.missing || totalMes === 0 ? '0%' : ((f.credito / totalMes)*100).toFixed(0) + '%'}
-                                                                                </span>
-                                                                                <span className="text-[10px] font-bold text-slate-400 mt-0.5">
-                                                                                    ROI U.C: {f.missing ? '---' : fmtPercentLong(f.credito / investimento)}
-                                                                                </span>
+
+                                                                            <div className="pt-3 border-t border-slate-100 grid grid-cols-2 gap-4">
+                                                                                <div className="flex flex-col gap-1">
+                                                                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Energia (kWh)</span>
+                                                                                    <span className="text-[11px] text-slate-600 font-medium">Injetada: <b className="text-slate-800">{f.injetado || 0}</b></span>
+                                                                                    <span className="text-[11px] text-[#00A36C] font-medium">Compensada: <b className="font-bold">{f.compensado || 0}</b></span>
+                                                                                </div>
+                                                                                <div className="flex flex-col gap-1 items-end text-right">
+                                                                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Saldos (kWh)</span>
+                                                                                    <span className="text-[11px] text-slate-500">Anterior: {f.saldoAnterior !== null ? f.saldoAnterior : '---'}</span>
+                                                                                    <span className="text-[11px] text-slate-600 font-bold">Atual: {f.saldoAtual !== null ? f.saldoAtual : '---'}</span>
+                                                                                </div>
                                                                             </div>
+                                                                            {!f.missing && (
+                                                                                <div className="mt-4 flex justify-between items-center bg-slate-50/50 p-3 rounded-xl border border-slate-100">
+                                                                                    <div className="flex flex-col">
+                                                                                        <span className="text-[9px] font-black text-slate-400 uppercase">Valor Pago (Taxas)</span>
+                                                                                        <span className="text-sm font-bold text-slate-600">{fmt(f.pago)}</span>
+                                                                                    </div>
+                                                                                    <div className="flex flex-col items-end">
+                                                                                        <span className="text-[9px] font-black text-[#00A36C] uppercase">Valor Compensado</span>
+                                                                                        <span className="text-sm font-black text-[#00A36C]">{fmt(f.credito)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
                                                                         </div>
                                                                     );
                                                                 })}
