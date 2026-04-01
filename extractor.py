@@ -393,6 +393,33 @@ def _limpar_valor(txt: str) -> float:
     try: return float(v)
     except: return 0.0
 
+def verificar_atualizacao_mensal(dados: dict, ucs_config: List[dict], mes_target: str = None) -> bool:
+    """
+    Verifica se TODAS as UCs configuradas já possuem uma fatura com a referência alvo no banco de dados.
+    Mês alvo padrão: Mês atual (YYYY-MM).
+    """
+    if not mes_target:
+        mes_target = datetime.now().strftime("%Y-%m")
+    
+    if not ucs_config: 
+        return False
+
+    ucs_faltas = []
+    for uc_item in ucs_config:
+        uc_cod = uc_item.get("uc")
+        if not uc_cod: continue
+        
+        faturas = dados.get("unidades", {}).get(uc_cod, {}).get("faturas", [])
+        # Verifica se existe a referência exata
+        if not any(f.get("referencia") == mes_target for f in faturas):
+            ucs_faltas.append(uc_cod)
+            
+    if not ucs_faltas:
+        return True # Todas OK
+        
+    logger.info("Checkup: Faturas de %s ausentes para UCs: %s", mes_target, ucs_faltas)
+    return False
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -406,6 +433,16 @@ async def main(args):
     dados = carregar_dados()
     ucs = config.get("unidades", []) or [{"uc": ""}]
     
+    # --- CHECKUP PRÉVIO ---
+    if not args.mes:
+        mes_atual = datetime.now().strftime("%Y-%m")
+        if verificar_atualizacao_mensal(dados, ucs, mes_atual):
+            print("\n" + "="*70)
+            logger.info("CHECKUP: Todas as UCs já possuem a fatura de %s extraída.", mes_atual)
+            logger.info("Encerrando extração para economizar tempo e evitar CAPTCHAs desnecessários.")
+            print("="*70 + "\n")
+            return
+    # -----------------------
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=False)
         context = await browser.new_context(

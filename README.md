@@ -11,10 +11,11 @@ O sistema foi projeto para investidores de energia solar e gestores de múltipla
 * **Inteligência Financeira:** Motor de cálculo que processa o custo evitado (economia) e projeta o Retorno sobre o Investimento (ROI) em um *dashboard* interativo local.
 * **Auditoria Documental:** Download sistemático e arquivamento espelhado dos PDFs originais na pasta `faturas/` para *compliance* e conferência manual.
 
-## 🌟 Novidades da Versão 0.3 (Premium Interface + UX)
+## 🌟 Novidades da Versão 0.4 (Otimização + Checkup)
+- **Checkup Preventivo Inteligente:** O extrator agora identifica se os dados do mês já foram coletados e encerra a execução antes de abrir o navegador, economizando tempo e evitando CAPTCHAs desnecessários.
+- **Nomenclatura Financeira Refinada:** Atualização da coluna de ROI para "Ganho mensal" para uma visualização mais intuitiva dos rendimentos da usina.
 - **Modo Escuro Dinâmico:** Interface com suporte a tema claro e escuro (Dark Mode) preservando a estética premium.
 - **Identificação por Apelidos (v2):** Visualização clara das unidades no formato `Número da UC → Nome Personalizado` (ex: `03178785-1 → Ana Maria`).
-- **Nomenclatura Financeira Precisa:** Atualização para "Valor Pago (Neoenergia)" para maior clareza nos custos de rede.
 - **Otimização para Impressão:** Layout responsivo e ajustes CSS (`@media print`) para geração de relatórios em PDF sem truncamento de dados.
 - **Single-File Dashboard:** Acesso simplificado via `index.html` na raiz, eliminando a necessidade de builds complexos para uso rápido.
 
