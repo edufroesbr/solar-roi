@@ -6,18 +6,17 @@ O sistema foi projeto para investidores de energia solar e gestores de múltipla
 
 ## 🚀 Capacidades do Sistema
 
-* **Extração Resiliente (Web Scraping):** Navegação automatizada via Playwright com contramedidas nativas contra detecção de bots e resolução assistida de reCAPTCHA.
+* **Extração Resiliente (Web Scraping):** Navegação automatizada via DrissionPage com contramedidas nativas contra detecção de bots e resolução assistida de reCAPTCHA.
 * **Consolidação em Lote:** Agregação de histórico de consumo, injeção de energia e créditos solares acumulados em um banco de dados local (`dados_faturas.json`).
 * **Inteligência Financeira:** Motor de cálculo que processa o custo evitado (economia) e projeta o Retorno sobre o Investimento (ROI) em um *dashboard* interativo local.
 * **Auditoria Documental:** Download sistemático e arquivamento espelhado dos PDFs originais na pasta `faturas/` para *compliance* e conferência manual.
 
-## 🌟 Novidades da Versão 0.4 (Otimização + Checkup)
-- **Checkup Preventivo Inteligente:** O extrator agora identifica se os dados do mês já foram coletados e encerra a execução antes de abrir o navegador, economizando tempo e evitando CAPTCHAs desnecessários.
-- **Nomenclatura Financeira Refinada:** Atualização da coluna de ROI para "Ganho mensal" para uma visualização mais intuitiva dos rendimentos da usina.
-- **Modo Escuro Dinâmico:** Interface com suporte a tema claro e escuro (Dark Mode) preservando a estética premium.
-- **Identificação por Apelidos (v2):** Visualização clara das unidades no formato `Número da UC → Nome Personalizado` (ex: `03178785-1 → Ana Maria`).
-- **Otimização para Impressão:** Layout responsivo e ajustes CSS (`@media print`) para geração de relatórios em PDF sem truncamento de dados.
-- **Single-File Dashboard:** Acesso simplificado via `index.html` na raiz, eliminando a necessidade de builds complexos para uso rápido.
+## 🌟 Novidades da Versão 0.5 (Estabilidade Avançada)
+- **Motor DrissionPage**: Migração completa do Playwright para DrissionPage, eliminando de vez os crashes de sistema e violações de memória (`-1073741819`) comuns no Windows.
+- **Portas Dinâmicas**: Inicialização do navegador em portas CDP aleatórias para evitar conflitos com outras janelas do Chrome abertas.
+- **Resiliência Multi-tentativa**: Lógica de auto-recuperação que tenta abrir o navegador até 3 vezes antes de falhar.
+- **Arquitetura Síncrona**: Simplificação do fluxo de código, reduzindo o overhead de processamento e facilitando o monitoramento da extração.
+- **Checkup Inteligente (v2)**: Verificação instantânea de faturas ausentes antes mesmo de carregar o motor gráfico, poupando recursos.
 
 ## 🛠️ Arquitetura e Pré-requisitos
 
@@ -37,9 +36,6 @@ cd solar-roi
 
 # Instale as dependências Python
 pip install -r requirements.txt
-
-# Instale os binários de navegação do Playwright
-playwright install chromium
 ```
 
 ## ⚙️ Configuração Segura (Setup)

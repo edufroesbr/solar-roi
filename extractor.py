@@ -1,20 +1,19 @@
 """
-extractor.py — Automação Playwright para Neoenergia Brasília
+extractor.py — Automação DrissionPage para Neoenergia Brasília
 =============================================================
 
 Extrai dados de consumo e faz download de faturas em PDF.
-Versão Restaurada: Foca na estabilidade original e suporte multi-perfil.
+Versão 0.5: Migração para DrissionPage para máxima estabilidade no Windows.
 """
 
 import argparse
-import asyncio
 import json
 import logging
 import os
 import random
 import re
 import sys
-import urllib.request
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -24,14 +23,9 @@ from urllib.parse import urljoin
 # Dependências
 # ---------------------------------------------------------------------------
 try:
-    from playwright.async_api import async_playwright, Page, BrowserContext, TimeoutError as PwTimeout
-    try:
-        from playwright_stealth import stealth_async
-    except ImportError:
-        from playwright_stealth import Stealth
-        stealth_async = Stealth().apply_stealth_async
+    from DrissionPage import ChromiumPage, ChromiumOptions
 except ImportError:
-    print("[ERRO] Playwright não instalado.")
+    print("[ERRO] DrissionPage não instalado. Execute: pip install DrissionPage")
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
@@ -54,7 +48,6 @@ logger = logging.getLogger("extractor")
 PROFILES_ROOT = Path("profiles")
 CURRENT_PROFILE = "PADRAO"
 BASE_URL = "https://agenciavirtual.neoenergiabrasilia.com.br"
-RATE_LIMIT_SECONDS = 4
 DATA_INICIO_FILTRO = "2025-10"
 
 def get_config_path() -> Path: return PROFILES_ROOT / CURRENT_PROFILE / "config.json"
@@ -80,93 +73,116 @@ def salvar_dados(dados: dict) -> None:
         try:
             with tmp.open("w", encoding="utf-8") as f:
                 json.dump(dados, f, indent=2, ensure_ascii=False)
-            tmp.replace(p)
-        except:
+            if tmp.exists():
+                if p.exists(): p.unlink()
+                tmp.rename(p)
+        except Exception as e:
+            logger.error(f"Erro ao salvar dados: {e}")
             if tmp.exists(): tmp.unlink()
 
 # ---------------------------------------------------------------------------
 # Simulação Humana
 # ---------------------------------------------------------------------------
-async def _simular_humano(page: Page):
+def _simular_humano(page: ChromiumPage):
     try:
-        for _ in range(random.randint(1, 3)):
-            await page.mouse.move(random.randint(100, 700), random.randint(100, 500), steps=10)
-            await asyncio.sleep(random.uniform(0.1, 0.4))
+        for _ in range(random.randint(1, 2)):
+            page.actions.move_to((random.randint(100, 700), random.randint(100, 500)))
+            time.sleep(random.uniform(0.1, 0.3))
     except: pass
 
-async def _clicar_humanizado(page: Page, selector_or_loc):
+def _clicar_humanizado(page: ChromiumPage, selector_or_ele):
     try:
-        loc = page.locator(selector_or_loc).first if isinstance(selector_or_loc, str) else selector_or_loc
-        await loc.scroll_into_view_if_needed()
-        box = await loc.bounding_box()
-        if box:
-            await page.mouse.move(box["x"] + box["width"]/2, box["y"] + box["height"]/2, steps=15)
-            await asyncio.sleep(0.2)
-        await loc.click(delay=random.randint(50, 150))
+        ele = page.ele(selector_or_ele) if isinstance(selector_or_ele, str) else selector_or_ele
+        if not ele: return False
+        
+        # Scroll para o elemento
+        ele.scroll.to_see()
+        time.sleep(0.2)
+        
+        # Move o mouse até o elemento (se não estiver em modo headless escondido)
+        try:
+            page.actions.move_to(ele)
+        except: pass
+        
+        time.sleep(random.uniform(0.1, 0.3))
+        ele.click()
         return True
-    except: return False
+    except Exception as e:
+        logger.debug(f"Falha ao clicar: {e}")
+        return False
 
-async def _digitar_humano(element, texto: str):
-    await asyncio.sleep(0.5)
+def _digitar_humano(ele, texto: str):
+    if not ele: return
+    ele.clear()
+    time.sleep(0.3)
     for char in texto:
-        await element.type(char, delay=random.randint(100, 250))
-    await asyncio.sleep(0.5)
+        ele.input(char)
+        time.sleep(random.uniform(0.05, 0.15))
+    time.sleep(0.3)
 
 # ---------------------------------------------------------------------------
 # CAPTCHA
 # ---------------------------------------------------------------------------
-async def resolver_captcha(page: Page) -> bool:
-    """Tenta resolver ou aguarda manual."""
+def resolver_captcha(page: ChromiumPage) -> bool:
+    """Detecta se há CAPTCHA e orienta o usuário."""
     try:
-        iframe = page.frame_locator('iframe[title*="reCAPTCHA"]').first
-        checkbox = iframe.locator(".recaptcha-checkbox-border").first
-        if await checkbox.is_visible():
-            logger.info("Tentando resolver CAPTCHA...")
-            await _clicar_humanizado(page, checkbox)
-            await asyncio.sleep(4)
-            checked = await iframe.locator("#recaptcha-anchor").get_attribute("aria-checked")
-            if checked != "false": return True
+        iframe = page.get_frame('title:reCAPTCHA')
+        if iframe:
+            checkbox = iframe.ele('.recaptcha-checkbox-border')
+            if checkbox:
+                logger.info("CAPTCHA detectado. Tentando clique inicial...")
+                checkbox.click()
+                time.sleep(2)
     except: pass
-    logger.info("Captcha pendente. Aguardando resolução manual/áudio...")
+    
+    # Verifica se já passou
+    if any(x in page.url for x in ["Servicos", "Historico", "UnidadeConsumidora"]):
+        return True
+        
+    logger.info("Aguardando resolução do CAPTCHA manualmente no navegador...")
     return False
 
 # ---------------------------------------------------------------------------
 # Navegação e Extração
 # ---------------------------------------------------------------------------
-async def autenticar(page: Page, cpf: str, senha: str) -> bool:
-    await page.goto(BASE_URL, wait_until="networkidle", timeout=60000)
+def autenticar(page: ChromiumPage, cpf: str, senha: str) -> bool:
+    page.get(BASE_URL)
+    time.sleep(2)
+    
     if "Servicos" in page.url: return True
 
-    if not await page.locator("input#cpfCnpjModal").is_visible():
-        await _clicar_humanizado(page, "button.login-button, .btn-primary:has-text('Entrar')")
-        await asyncio.sleep(2)
+    btn_login = page.ele('button.login-button') or page.ele('.btn-primary@@text():Entrar')
+    if btn_login:
+        _clicar_humanizado(page, btn_login)
+        time.sleep(2)
 
-    await _digitar_humano(page.locator("input#cpfCnpjModal"), cpf)
-    await _digitar_humano(page.locator("input#senhaModal"), senha)
-    
-    await resolver_captcha(page)
-    
-    print("\n" + "!"*50 + "\nRESOLVA O CAPTCHA SE NECESSÁRIO NO NAVEGADOR\n" + "!"*50 + "\n")
-    
-    for _ in range(300): # 5 min
-        if any(x in page.url for x in ["Servicos", "Historico", "UnidadeConsumidora"]):
-            logger.info("Acesso autorizado.")
-            return True
-        await asyncio.sleep(1)
+    input_cpf = page.ele('#cpfCnpjModal')
+    if input_cpf:
+        _digitar_humano(input_cpf, cpf)
+        _digitar_humano(page.ele('#senhaModal'), senha)
+        
+        resolver_captcha(page)
+        
+        print("\n" + "!"*50 + "\nRESOLVA O CAPTCHA NO NAVEGADOR SE NECESSÁRIO\n" + "!"*50 + "\n")
+        
+        # Aguarda autorização (até 5 min)
+        for _ in range(300):
+            if any(x in page.url for x in ["Servicos", "Historico", "UnidadeConsumidora"]):
+                logger.info("Acesso autorizado.")
+                return True
+            time.sleep(1)
     return False
 
-async def descobrir_ucs_ativas(page: Page) -> List[str]:
-    """Retorna uma lista de códigos de UC que estão com status 'ligado' ou 'ativa'."""
+def descobrir_ucs_ativas(page: ChromiumPage) -> List[str]:
     if "/Servicos" not in page.url or "/Servicos/Menu" in page.url:
-        await page.goto(f"{BASE_URL}/Servicos", wait_until="networkidle")
+        page.get(f"{BASE_URL}/Servicos")
     
-    await asyncio.sleep(4)
-    rows = page.locator("table#unidades tbody tr, .unit-card, tr[role='row']")
-    count = await rows.count()
+    time.sleep(4)
+    rows = page.eles('css:table#unidades tbody tr, .unit-card, tr[role="row"]')
     
     ucs_encontradas = []
-    for i in range(count):
-        txt = (await rows.nth(i).inner_text()).lower()
+    for row in rows:
+        txt = row.text.lower()
         is_ativa = any(s in txt for s in ["ligado", "ativa", "ativo", "conectada"])
         if is_ativa:
             match = re.search(r"(\d{1,3}\.?\d{3}\.?\d{3}-[A-Z0-9])", txt, re.I)
@@ -176,102 +192,76 @@ async def descobrir_ucs_ativas(page: Page) -> List[str]:
     logger.info("UCs ativas descobertas: %s", ucs_encontradas)
     return ucs_encontradas
 
-async def processar_uc(page: Page, uc_info: dict, dados: dict, mes_filtro: str = None) -> bool:
+def processar_uc(page: ChromiumPage, uc_info: dict, dados: dict, mes_filtro: str = None) -> bool:
     uc_alvo = uc_info.get("uc")
     logger.info("Iniciando UC: %s", uc_alvo if uc_alvo else "Automatizada")
 
-    # 1. Lista de Unidades
     if "/Servicos" not in page.url or "/Servicos/Menu" in page.url:
-        await page.goto(f"{BASE_URL}/Servicos", wait_until="networkidle")
+        page.get(f"{BASE_URL}/Servicos")
     
-    await asyncio.sleep(3)
-    await page.screenshot(path="debug_lista_unidades.png")
-    logger.info("Screenshot da lista de unidades salvo em debug_lista_unidades.png")
+    time.sleep(3)
     
-    # Seletores estáveis baseados no HTML real
-    rows = page.locator("table#unidades tbody tr, .unit-card, tr[role='row']")
-    count = await rows.count()
-    logger.info("Total de linhas detectadas na lista: %d", count)
+    rows = page.eles('css:table#unidades tbody tr, .unit-card, tr[role="row"]')
+    idx_final = -1
     
-    idx_ativa = -1
-    idx_alvo = -1
-    
-    for i in range(count):
-        txt = (await rows.nth(i).inner_text()).lower()
-        logger.info("Linha %d texto: %s", i, txt.replace('\n', ' '))
-        
+    for i, row in enumerate(rows):
+        txt = row.text.lower()
         is_ativa = any(s in txt for s in ["ligado", "ativa", "ativo", "conectada"])
         if not is_ativa: continue
         
-        if idx_ativa == -1: idx_ativa = i
-        
-        if uc_alvo:
-            clean_alvo = "".join(re.findall(r'\d', uc_alvo))
-            if clean_alvo in "".join(re.findall(r'\d', txt)):
-                idx_alvo = i
-                break
-                
-    # Define qual índice usar
-    final_idx = idx_alvo if idx_alvo != -1 else idx_ativa
-    
-    if final_idx == -1:
+        if not uc_alvo: # Pega a primeira ativa se não houver alvo
+            idx_final = i
+            break
+            
+        clean_alvo = "".join(re.findall(r'\d', uc_alvo))
+        if clean_alvo in "".join(re.findall(r'\d', txt)):
+            idx_final = i
+            break
+            
+    if idx_final == -1:
         logger.error("Nenhuma UC ativa encontrada.")
         return False
 
-    if idx_alvo == -1 and uc_alvo:
-        logger.warning("UC alvo '%s' não encontrada ou inativa. Usando alternativa ativa.", uc_alvo)
-
-    row = rows.nth(final_idx)
-    # Captura o código real para atualizar config/dados
-    match_uc = re.search(r"(\d{1,3}\.?\d{3}\.?\d{3}-[A-Z0-9])", await row.inner_text())
+    row = rows[idx_final]
+    match_uc = re.search(r"(\d{1,3}\.?\d{3}\.?\d{3}-[A-Z0-9])", row.text)
     if match_uc: uc_info["uc"] = match_uc.group(1)
     
     logger.info("Acessando UC: %s", uc_info["uc"])
-    # Clique no botão que contém o link de serviços (payload)
-    btn = row.locator("a[href*='payload']").first
-    href_payload = await btn.get_attribute("href")
-    
-    await _clicar_humanizado(page, btn)
-    await page.wait_for_load_state("networkidle")
-    await asyncio.sleep(4)
-    await page.screenshot(path="debug_pos_clique_uc.png")
-    logger.info("Screenshot pós-clique UC salvo.")
-
-    # 2. Histórico de Consumo
-    # Tenta encontrar o botão ou redirecionar
-    try:
-        hist_btn = page.locator("a[href*='HistoricoConsumo'], .card:has-text('Histórico'), :text('Histórico')").first
-        if await hist_btn.is_visible():
-            logger.info("Botão de histórico encontrado. Clicando...")
-            await _clicar_humanizado(page, hist_btn)
-        else:
-            raise Exception("Botão não visível")
-    except:
-        logger.warning("Falha ao clicar no Histórico. Tentando redirecionamento forçado...")
-        await page.goto(f"{BASE_URL}/HistoricoConsumo", wait_until="networkidle")
-
-    await asyncio.sleep(8) # Aumentado para buffering lento
-    await page.screenshot(path="debug_pagina_historico.png")
-    logger.info("Screenshot da página de histórico salvo.")
-    
-    # 3. Extração da Tabela
-    faturas = await extrair_tabela_historico(page, mes_filtro)
-    if not faturas:
-        logger.warning("A tabela de histórico não carregou para a UC %s.", uc_info["uc"])
+    btn = row.ele('tag:a@@href*payload')
+    if btn:
+        _clicar_humanizado(page, btn)
+        time.sleep(4)
+    else:
+        logger.error("Botão de serviços não encontrado para esta UC.")
         return False
 
-    # 4. Salvamento e Download
+    # Histórico de Consumo
+    try:
+        hist_btn = page.ele('text:Histórico') or page.ele('css:a[href*="HistoricoConsumo"]')
+        if hist_btn:
+            _clicar_humanizado(page, hist_btn)
+        else:
+            page.get(f"{BASE_URL}/HistoricoConsumo")
+    except:
+        page.get(f"{BASE_URL}/HistoricoConsumo")
+
+    time.sleep(6)
+    
+    faturas = extrair_tabela_historico(page, mes_filtro)
+    if not faturas:
+        logger.warning("Nenhuma fatura encontrada no histórico para %s.", uc_info["uc"])
+        return False
+
     if uc_info["uc"] not in dados["unidades"]:
         dados["unidades"][uc_info["uc"]] = {"faturas": []}
     
     uc_db = dados["unidades"][uc_info["uc"]]
     for f in faturas:
-        # Verifica duplicata
         v_existente = next((x for x in uc_db["faturas"] if x["referencia"] == f["referencia"]), None)
         
         pdf_path = None
         if f.get("pdf_url"):
-            pdf_path = await baixar_pdf(page, uc_info["uc"], f["referencia"], f["pdf_url"])
+            pdf_path = baixar_pdf(page, uc_info["uc"], f["referencia"], f["pdf_url"])
         
         if v_existente:
             v_existente.update(f)
@@ -283,103 +273,80 @@ async def processar_uc(page: Page, uc_info: dict, dados: dict, mes_filtro: str =
     uc_db["faturas"].sort(key=lambda x: x["referencia"], reverse=True)
     return True
 
-async def extrair_tabela_historico(page: Page, mes_filtro: str = None) -> List[dict]:
-    # Espera por qualquer um dos IDs de tabela conhecidos ou tags genéricas
-    try:
-        await page.wait_for_selector("#protocolos, table.table, .dataTables_wrapper", timeout=20000)
-    except: return []
-
+def extrair_tabela_historico(page: ChromiumPage, mes_filtro: str = None) -> List[dict]:
     lista = []
-    while True:
-        # Pega as linhas atuais
-        rows = page.locator("table tbody tr")
-        count = await rows.count()
+    
+    for _ in range(5): # Tenta paginar algumas vezes
+        rows = page.eles('css:table tbody tr')
+        if not rows: break
         
         achou_antigo = False
-        for i in range(count):
-            cells = rows.nth(i).locator("td")
-            if await cells.count() < 7: continue
+        for row in rows:
+            cells = row.eles('tag:td')
+            if len(cells) < 7: continue
             
-            texto_ref = (await cells.nth(0).inner_text()).strip()
+            texto_ref = cells[0].text.strip()
             referencia = _normalizar_ref(texto_ref)
             if not referencia: continue
             
-            # Se for anterior ao início configurado, encerra a busca
             if referencia < DATA_INICIO_FILTRO:
                 achou_antigo = True
                 continue
 
-            # Evita duplicatas se estivermos em loop de páginas
             if any(f["referencia"] == referencia for f in lista):
                 continue
                 
             if mes_filtro and mes_filtro != referencia: continue
             
             pdf_url = ""
-            link = cells.locator("a[href*='SegundaVia']").first
-            if await link.count() > 0:
-                pdf_url = urljoin(BASE_URL, await link.get_attribute("href"))
+            link = row.ele('css:a[href*="SegundaVia"]')
+            if link:
+                pdf_url = urljoin(BASE_URL, link.attr('href'))
                 
             fatura = {
                 "mes": texto_ref,
                 "referencia": referencia,
-                "kwh_faturado": _limpar_valor(await cells.nth(5).inner_text()),
-                "valor_pago": _limpar_valor(await cells.nth(6).inner_text()),
-                "vencimento": (await cells.nth(7).inner_text()).strip(),
+                "kwh_faturado": _limpar_valor(cells[5].text),
+                "valor_pago": _limpar_valor(cells[6].text),
+                "vencimento": cells[7].text.strip() if len(cells) > 7 else "",
                 "pdf_url": pdf_url
             }
             lista.append(fatura)
             logger.info("   Fatura detectada: %s", referencia)
         
-        if achou_antigo:
-            break
+        if achou_antigo: break
             
-        # Tenta clicar no botão "Próximo" ou "Ver Mais"
-        btn_prox = page.locator("a:has-text('Próximo'), .paginate_button.next, a:has-text('>')").first
-        if await btn_prox.is_visible() and await btn_prox.is_enabled():
-            logger.info("   Clicando em 'Próximo' para buscar mais datas...")
-            await _clicar_humanizado(page, btn_prox)
-            await asyncio.sleep(4)
+        btn_prox = page.ele('text:Próximo') or page.ele('css:.paginate_button.next')
+        if btn_prox and btn_prox.is_enabled():
+            _clicar_humanizado(page, btn_prox)
+            time.sleep(4)
         else:
             break
             
     return lista
 
-async def baixar_pdf(page: Page, uc: str, ref: str, url: str) -> Optional[str]:
+def baixar_pdf(page: ChromiumPage, uc: str, ref: str, url: str) -> Optional[str]:
     diretorio = PROFILES_ROOT / CURRENT_PROFILE / "faturas" / uc
     diretorio.mkdir(parents=True, exist_ok=True)
     fpath = diretorio / f"{ref}.pdf"
     
     if fpath.exists():
-        logger.info("   PDF já existe: %s", ref)
         return str(fpath)
     
     logger.info("   Baixando PDF %s...", ref)
     try:
-        # Tenta capturar o download disparado por navegação ou clique
-        try:
-            async with page.expect_download(timeout=20000) as dinfo:
-                await page.goto(url)
-            download = await dinfo.value
-            await download.save_as(str(fpath))
+        # Configura o destino do download no DrissionPage
+        page.set.download_path(str(diretorio))
+        
+        # Tenta disparar o download clicando no link ou navegando até a URL
+        # DrissionPage captura downloads automaticamente se configurado
+        page.download(url, rename=f"{ref}.pdf")
+        
+        if fpath.exists():
             logger.info("   ✅ PDF salvo: %s", fpath)
-            await asyncio.sleep(2)
             return str(fpath)
-        except Exception as e1:
-            logger.warning("   ⚠️ Falha no download via goto: %s. Tentando via request...", e1)
-            
-            # Fallback: requisição direta (pode precisar de cookies)
-            response = await page.request.get(url)
-            if response.ok:
-                body = await response.body()
-                fpath.write_bytes(body)
-                logger.info("   ✅ PDF salvo (fallback request): %s", fpath)
-                return str(fpath)
-            else:
-                logger.error("   ❌ Falha no download (Status: %d)", response.status)
-
     except Exception as e:
-        logger.error("   ❌ Erro crítico ao baixar PDF %s: %s", ref, e)
+        logger.error("   ❌ Erro ao baixar PDF %s: %s", ref, e)
     
     return None
 
@@ -394,15 +361,10 @@ def _limpar_valor(txt: str) -> float:
     except: return 0.0
 
 def verificar_atualizacao_mensal(dados: dict, ucs_config: List[dict], mes_target: str = None) -> bool:
-    """
-    Verifica se TODAS as UCs configuradas já possuem uma fatura com a referência alvo no banco de dados.
-    Mês alvo padrão: Mês atual (YYYY-MM).
-    """
     if not mes_target:
         mes_target = datetime.now().strftime("%Y-%m")
     
-    if not ucs_config: 
-        return False
+    if not ucs_config: return False
 
     ucs_faltas = []
     for uc_item in ucs_config:
@@ -410,12 +372,10 @@ def verificar_atualizacao_mensal(dados: dict, ucs_config: List[dict], mes_target
         if not uc_cod: continue
         
         faturas = dados.get("unidades", {}).get(uc_cod, {}).get("faturas", [])
-        # Verifica se existe a referência exata
         if not any(f.get("referencia") == mes_target for f in faturas):
             ucs_faltas.append(uc_cod)
             
-    if not ucs_faltas:
-        return True # Todas OK
+    if not ucs_faltas: return True
         
     logger.info("Checkup: Faturas de %s ausentes para UCs: %s", mes_target, ucs_faltas)
     return False
@@ -423,74 +383,89 @@ def verificar_atualizacao_mensal(dados: dict, ucs_config: List[dict], mes_target
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-async def main(args):
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mes")
+    parser.add_argument("--todos", action="store_true")
+    parser.add_argument("--uc")
+    parser.add_argument("--profile", default="PADRAO")
+    args = parser.parse_args()
+
     global CURRENT_PROFILE
     CURRENT_PROFILE = args.profile
     
     config = carregar_config()
-    if not config: return logger.error("Perfil %s não encontrado.", CURRENT_PROFILE)
+    if not config:
+        logger.error("Perfil %s não encontrado.", CURRENT_PROFILE)
+        return
 
     dados = carregar_dados()
     ucs = config.get("unidades", []) or [{"uc": ""}]
     
-    # --- CHECKUP PRÉVIO ---
+    # Checkup previo
     if not args.mes:
         mes_atual = datetime.now().strftime("%Y-%m")
         if verificar_atualizacao_mensal(dados, ucs, mes_atual):
             print("\n" + "="*70)
-            logger.info("CHECKUP: Todas as UCs já possuem a fatura de %s extraída.", mes_atual)
-            logger.info("Encerrando extração para economizar tempo e evitar CAPTCHAs desnecessários.")
+            logger.info("CHECKUP: Todas as UCs já possuem a fatura de %s.", mes_atual)
             print("="*70 + "\n")
             return
-    # -----------------------
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=False)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            accept_downloads=True
-        )
-        page = await context.new_page()
-        await stealth_async(page)
-        
-        if await autenticar(page, config["cpf"], config["senha"]):
-            # Se --todos for passado, tenta descobrir UCs se a lista estiver vazia/genérica
+
+    # Browser Setup
+    co = ChromiumOptions()
+    
+    # Previne conflitos com outras instâncias do Chrome abertas pelo usuário
+    import random
+    porta_aleatoria = random.randint(9223, 9350)
+    co.set_paths(local_port=porta_aleatoria)
+    
+    # Opções de estabilidade para Windows
+    co.set_argument('--no-sandbox')
+    co.set_argument('--disable-gpu')
+    co.set_argument('--disable-dev-shm-usage')
+    
+    # Tenta iniciar o navegador com retentativas
+    page = None
+    for tentativa in range(3):
+        try:
+            page = ChromiumPage(co)
+            if page: break
+        except Exception as e:
+            logger.warning(f"Tentativa {tentativa+1} de abrir o navegador falhou: {e}")
+            time.sleep(2)
+    
+    if not page:
+        logger.error("Não foi possível inicializar o navegador DrissionPage.")
+        return
+
+    try:
+        if autenticar(page, config["cpf"], config["senha"]):
             if args.todos:
-                ucs_descobertas = await descobrir_ucs_ativas(page)
+                ucs_descobertas = descobrir_ucs_ativas(page)
                 for code in ucs_descobertas:
-                    # Adiciona se não estiver na lista
                     if not any(u.get("uc") == code for u in ucs):
                         ucs.append({"uc": code})
-                
-                # Remove UC vazia se descobrimos algo
                 ucs = [u for u in ucs if u.get("uc")]
 
             for uc in ucs:
-                if not uc.get("uc") and not args.todos:
-                    # Se não tem UC e não quer todos, pula ou processa default
-                    continue
+                if not uc.get("uc") and not args.todos: continue
                     
-                sucesso = await processar_uc(page, uc, dados, args.mes)
+                sucesso = processar_uc(page, uc, dados, args.mes)
                 if sucesso and uc.get("uc"):
-                    # Atualiza config se for uma UC nova
                     if not any(u.get("uc") == uc["uc"] for u in config.get("unidades", [])):
                         config.setdefault("unidades", []).append({"uc": uc["uc"]})
                         with get_config_path().open("w", encoding="utf-8") as f:
                             json.dump(config, f, indent=2)
         
-        await browser.close()
-    
-    salvar_dados(dados)
-    try:
-        from sync_json_with_pdfs import sync
-        sync(profile=CURRENT_PROFILE)
-    except: pass
-    logger.info("Fim do processamento para o perfil: %s", CURRENT_PROFILE)
+        salvar_dados(dados)
+        try:
+            from sync_json_with_pdfs import sync
+            sync(profile=CURRENT_PROFILE)
+        except: pass
+        logger.info("Fim do processamento para o perfil: %s", CURRENT_PROFILE)
+        
+    finally:
+        page.quit()
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("--mes")
-    p.add_argument("--todos", action="store_true")
-    p.add_argument("--uc")
-    p.add_argument("--profile", default="PADRAO")
-    p.add_argument("--auto", action="store_true")
-    asyncio.run(main(p.parse_args()))
+    main()
